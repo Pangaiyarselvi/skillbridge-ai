@@ -1,14 +1,27 @@
 import axios from "axios";
 import { useAuthStore } from "../store/authStore";
 
+function resolveBaseUrl(): string {
+  const envUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
+  if (!envUrl) return "http://localhost:5000/api";
+
+  let clean = envUrl.replace(/\/+$/, "");
+  if (!clean.endsWith("/api") && !clean.includes("/api/")) {
+    clean = `${clean}/api`;
+  }
+  return clean;
+}
+
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? "http://localhost:5000/api",
-  withCredentials: true, // sends refreshToken httpOnly cookie
+  baseURL: resolveBaseUrl(),
+  withCredentials: true, // sends refreshToken httpOnly cookie when available
 });
 
 api.interceptors.request.use((config) => {
   const token = useAuthStore.getState().accessToken;
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
   return config;
 });
 
@@ -19,7 +32,18 @@ api.interceptors.response.use(
   (res) => res,
   async (error) => {
     const original = error.config;
-    if (error.response?.status === 401 && !original._retry) {
+    if (!original) return Promise.reject(error);
+
+    const url = original.url || "";
+    const isAuthRoute =
+      url.includes("/auth/login") ||
+      url.includes("/auth/signup") ||
+      url.includes("/auth/refresh") ||
+      url.includes("/auth/forgot-password") ||
+      url.includes("/auth/reset-password");
+
+    // Only attempt token refresh for protected endpoints (NOT for login/signup/auth itself)
+    if (error.response?.status === 401 && !original._retry && !isAuthRoute) {
       original._retry = true;
 
       if (isRefreshing) {
@@ -29,14 +53,22 @@ api.interceptors.response.use(
 
       isRefreshing = true;
       try {
-        const { data } = await api.post("/auth/refresh");
-        useAuthStore.getState().setAccessToken(data.data.accessToken);
+        const storedRefreshToken = useAuthStore.getState().refreshToken;
+        const { data } = await api.post("/auth/refresh", {
+          refreshToken: storedRefreshToken || undefined,
+        });
+
+        const newAccessToken = data.data.accessToken;
+        useAuthStore.getState().setAccessToken(newAccessToken);
         queue.forEach((cb) => cb());
         queue = [];
         return api(original);
       } catch (refreshErr) {
         useAuthStore.getState().logout();
-        window.location.href = "/login";
+        // Redirect to login only if we were trying to access a protected dashboard
+        if (!window.location.pathname.startsWith("/login") && !window.location.pathname.startsWith("/signup")) {
+          window.location.href = "/login";
+        }
         return Promise.reject(refreshErr);
       } finally {
         isRefreshing = false;
@@ -45,3 +77,4 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+

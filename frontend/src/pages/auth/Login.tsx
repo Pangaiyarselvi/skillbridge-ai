@@ -25,8 +25,8 @@ export default function Login() {
     setLoading(true);
     try {
       const { data } = await api.post("/auth/login", { email, password });
-      const { accessToken, user } = data.data;
-      setSession(accessToken, user);
+      const { accessToken, refreshToken, user } = data.data;
+      setSession(accessToken, user, refreshToken);
       push("Welcome back!", "success");
       navigate(HOME_BY_ROLE[user.role] ?? "/", { replace: true });
     } catch (err) {

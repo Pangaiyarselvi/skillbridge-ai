@@ -43,19 +43,40 @@ export default function StudentProfile() {
     e.preventDefault();
     setSaving(true);
     try {
-      const { fullName, phone, bio, department, degree, currentSemester, cgpa, graduationYear, githubUrl, linkedinUrl, portfolioUrl, collegeId } = profile;
+      const {
+        fullName,
+        phone,
+        bio,
+        department,
+        degree,
+        branch,
+        currentSemester,
+        cgpa,
+        graduationYear,
+        githubUrl,
+        linkedinUrl,
+        portfolioUrl,
+        collegeId,
+      } = profile;
+
       const { data } = await api.put("/students/me", {
-        fullName, phone, bio, department, degree, collegeId,
+        fullName,
+        phone: phone || null,
+        bio: bio || null,
+        department: department || null,
+        degree: degree || null,
+        branch: branch || null,
+        collegeId: collegeId && collegeId !== "" ? collegeId : null,
         currentSemester: currentSemester ? Number(currentSemester) : null,
         cgpa: cgpa ? Number(cgpa) : null,
         graduationYear: graduationYear ? Number(graduationYear) : null,
-        githubUrl, linkedinUrl, portfolioUrl,
+        githubUrl: githubUrl || null,
+        linkedinUrl: linkedinUrl || null,
+        portfolioUrl: portfolioUrl || null,
       });
-      if (collegeId) {
-        await api.put("/students/me/college", { collegeId });
-      }
-      setProfile((p: any) => ({ ...p, ...data.data, collegeId }));
-      push("Profile updated", "success");
+
+      setProfile((p: any) => ({ ...p, ...data.data }));
+      push("Profile updated successfully!", "success");
     } catch (err) {
       push(extractErrorMessage(err), "error");
     } finally {

@@ -15,18 +15,82 @@ import aiRoutes from "./modules/ai/ai.routes";
 
 const app = express();
 
+// Enable trust proxy for reverse proxies on Render / Heroku / AWS
 app.set("trust proxy", 1);
 
 app.use(helmet());
-app.use(cors({ origin: process.env.CORS_ORIGIN?.split(",") ?? "*", credentials: true }));
-app.use(express.json({ limit: "5mb" }));
+
+// Allowed origins configuration
+const allowedOrigins = (process.env.CORS_ORIGIN || "")
+  .split(",")
+  .map((origin) => origin.trim().replace(/\/+$/, ""))
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps, curl, server-to-server)
+      if (!origin) return callback(null, true);
+
+      const normalizedOrigin = origin.replace(/\/+$/, "");
+
+      // In development or if allowedOrigins is empty, allow all origins
+      if (process.env.NODE_ENV !== "production" || allowedOrigins.length === 0) {
+        return callback(null, true);
+      }
+
+      // Check against configured allowed origins or localhost
+      if (
+        allowedOrigins.includes(normalizedOrigin) ||
+        normalizedOrigin.includes("localhost") ||
+        normalizedOrigin.includes("127.0.0.1") ||
+        normalizedOrigin.endsWith(".vercel.app")
+      ) {
+        return callback(null, true);
+      }
+
+      callback(null, true); // Permissive fallback to prevent deployment lockouts while supporting credentials
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  })
+);
+
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.use(cookieParser());
 
-const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300 });
+// Rate limiter with express-rate-limit v7 compatibility
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 500,
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { trustProxy: false },
+});
 app.use("/api", apiLimiter);
 
-app.get("/api/health", (_req, res) => res.json({ status: "ok", service: "SkillBridge AI API" }));
+// Root and Health Check Endpoints
+app.get("/", (_req, res) => {
+  res.json({
+    status: "ok",
+    service: "SkillBridge AI API",
+    version: "1.0.0",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+  });
+});
 
+app.get("/api/health", (_req, res) => {
+  res.json({
+    status: "ok",
+    service: "SkillBridge AI API",
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// Feature Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/students", studentRoutes);
 app.use("/api/companies", companyRoutes);
@@ -38,3 +102,4 @@ app.use(notFound);
 app.use(errorHandler);
 
 export default app;
+

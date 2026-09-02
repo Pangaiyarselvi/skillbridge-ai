@@ -31,13 +31,31 @@ export async function signup(input: {
     },
   });
 
+  const payload = { userId: user.id, role: user.role };
+  const accessToken = signAccessToken(payload);
+  const refreshToken = signRefreshToken(payload);
 
-  return { userId: user.id, email: user.email, role: user.role };
+  await prisma.refreshToken.create({
+    data: {
+      token: refreshToken,
+      userId: user.id,
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    },
+  });
+
+  return {
+    accessToken,
+    refreshToken,
+    user: { id: user.id, email: user.email, role: user.role, fullName: input.fullName },
+  };
 }
 
 export async function login(email: string, password: string) {
   const normalizedEmail = email.trim().toLowerCase();
-  const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+  const user = await prisma.user.findUnique({
+    where: { email: normalizedEmail },
+    include: { student: true, company: true, college: true, admin: true },
+  });
   if (!user || !user.isActive) throw new AppError("Invalid credentials", 401);
   if (!user.isEmailVerified) throw new AppError("Please verify your email before logging in", 403);
 
@@ -58,7 +76,18 @@ export async function login(email: string, password: string) {
 
   await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
 
-  return { accessToken, refreshToken, user: { id: user.id, email: user.email, role: user.role } };
+  const name =
+    user.student?.fullName ??
+    user.company?.name ??
+    user.college?.name ??
+    user.admin?.fullName ??
+    user.email;
+
+  return {
+    accessToken,
+    refreshToken,
+    user: { id: user.id, email: user.email, role: user.role, fullName: name },
+  };
 }
 
 export async function refresh(token?: string) {
@@ -84,7 +113,8 @@ export async function logout(token?: string) {
 }
 
 export async function forgotPassword(email: string) {
-  const user = await prisma.user.findUnique({ where: { email } });
+  const normalizedEmail = email.trim().toLowerCase();
+  const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
   if (!user) return; // silent to prevent user enumeration
 
   const resetToken = crypto.randomBytes(32).toString("hex");
@@ -93,10 +123,11 @@ export async function forgotPassword(email: string) {
     data: { resetToken, resetTokenExpiry: new Date(Date.now() + 60 * 60 * 1000) },
   });
 
+  const appUrl = process.env.APP_URL || "http://localhost:5173";
   await sendEmail({
     to: user.email,
     subject: "Reset your SkillBridge AI password",
-    html: `<p>Click to reset: <a href="${process.env.APP_URL}/reset-password?token=${resetToken}">Reset Password</a></p>`,
+    html: `<p>Click to reset your password: <a href="${appUrl}/reset-password?token=${resetToken}">${appUrl}/reset-password?token=${resetToken}</a></p>`,
   });
 }
 
@@ -122,3 +153,4 @@ export async function verifyEmail(token: string) {
     data: { isEmailVerified: true, emailVerifyToken: null },
   });
 }
+

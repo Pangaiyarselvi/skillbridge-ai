@@ -8,11 +8,32 @@ import {
   verifyEmailSchema,
 } from "./auth.validation";
 
+const isProd = process.env.NODE_ENV === "production";
+
+const cookieOptions = {
+  httpOnly: true,
+  secure: isProd,
+  sameSite: (isProd ? "none" : "lax") as "none" | "lax",
+  maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+  path: "/",
+};
+
 export async function signupHandler(req: Request, res: Response, next: NextFunction) {
   try {
     const data = signupSchema.parse(req.body);
     const result = await authService.signup(data);
-    res.status(201).json({ success: true, data: result });
+
+    res
+      .cookie("refreshToken", result.refreshToken, cookieOptions)
+      .status(201)
+      .json({
+        success: true,
+        data: {
+          accessToken: result.accessToken,
+          refreshToken: result.refreshToken,
+          user: result.user,
+        },
+      });
   } catch (err) {
     next(err);
   }
@@ -22,14 +43,17 @@ export async function loginHandler(req: Request, res: Response, next: NextFuncti
   try {
     const data = loginSchema.parse(req.body);
     const result = await authService.login(data.email, data.password);
+
     res
-      .cookie("refreshToken", result.refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 30 * 24 * 60 * 60 * 1000,
-      })
-      .json({ success: true, data: { accessToken: result.accessToken, user: result.user } });
+      .cookie("refreshToken", result.refreshToken, cookieOptions)
+      .json({
+        success: true,
+        data: {
+          accessToken: result.accessToken,
+          refreshToken: result.refreshToken,
+          user: result.user,
+        },
+      });
   } catch (err) {
     next(err);
   }
@@ -49,7 +73,7 @@ export async function logoutHandler(req: Request, res: Response, next: NextFunct
   try {
     const token = req.cookies?.refreshToken ?? req.body?.refreshToken;
     if (token) await authService.logout(token);
-    res.clearCookie("refreshToken").json({ success: true });
+    res.clearCookie("refreshToken", cookieOptions).json({ success: true });
   } catch (err) {
     next(err);
   }
@@ -84,3 +108,4 @@ export async function verifyEmailHandler(req: Request, res: Response, next: Next
     next(err);
   }
 }
+

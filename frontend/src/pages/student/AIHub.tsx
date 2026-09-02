@@ -39,10 +39,23 @@ export default function StudentAIHub() {
     })();
   }, []);
 
+  const [analyzingGap, setAnalyzingGap] = useState(false);
+
   async function runSkillGap() {
-    if (!targetRole) return;
-    const { data } = await api.post("/ai/skill-gap", { targetRole });
-    setSkillGap(data.data);
+    if (!targetRole.trim()) {
+      push("Please enter a target role to analyze", "info");
+      return;
+    }
+    setAnalyzingGap(true);
+    try {
+      const { data } = await api.post("/ai/skill-gap", { targetRole: targetRole.trim() });
+      setSkillGap(data.data);
+      push("Skill gap analysis complete!", "success");
+    } catch (err) {
+      push(extractErrorMessage(err), "error");
+    } finally {
+      setAnalyzingGap(false);
+    }
   }
 
   const readinessChartData = [{ name: "Readiness", value: readiness ?? 0, fill: "#6D5EF0" }];
@@ -142,9 +155,10 @@ export default function StudentAIHub() {
           />
           <button
             onClick={runSkillGap}
-            className="bg-brand-gradient text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-glow hover:brightness-105"
+            disabled={analyzingGap}
+            className="bg-brand-gradient text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-glow hover:brightness-105 disabled:opacity-50"
           >
-            Analyze
+            {analyzingGap ? "Analyzing…" : "Analyze"}
           </button>
         </div>
         {skillGap && (

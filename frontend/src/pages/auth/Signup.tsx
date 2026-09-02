@@ -29,8 +29,8 @@ export default function Signup() {
       const { data } = await api.post("/auth/signup", { fullName, email, password, role });
       const result = data.data;
       if (result?.accessToken && result?.user) {
-        setSession(result.accessToken, result.user);
-        push("Account created!", "success");
+        setSession(result.accessToken, result.user, result.refreshToken);
+        push("Account created! Welcome to SkillBridge AI.", "success");
         navigate(HOME_BY_ROLE[result.user.role] ?? "/login", { replace: true });
       } else {
         push("Account created. Please log in.", "success");
