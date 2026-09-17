@@ -4,7 +4,7 @@ export const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY || "gsk_placeholder_key_skillbridge",
 });
 
-export const GROQ_MODEL = "llama-3.3-70b-versatile";
+export const GROQ_MODEL = "llama3-8b-8192";
 
 /** Clean JSON string by stripping markdown code blocks if returned by LLM */
 function cleanJsonString(raw: string): string {

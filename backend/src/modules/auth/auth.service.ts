@@ -100,7 +100,7 @@ export async function refresh(token?: string) {
 
   try {
     const payload = verifyRefreshToken(token);
-    const accessToken = signAccessToken(payload);
+    const accessToken = signAccessToken({ userId: payload.userId, role: payload.role });
     return { accessToken };
   } catch {
     throw new AppError("Invalid refresh token", 401);

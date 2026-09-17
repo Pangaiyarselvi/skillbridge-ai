@@ -47,6 +47,7 @@ router.get("/industry-expectations", ctrl.listIndustryExpectations);
 
 // Notifications
 router.get("/notifications", ctrl.listNotifications);
+router.patch("/notifications/mark-all-read", ctrl.markAllNotificationsRead);
 router.patch("/notifications/:id/read", ctrl.markNotificationRead);
 
 export default router;

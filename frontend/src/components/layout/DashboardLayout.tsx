@@ -18,9 +18,14 @@ import {
   Menu,
   X,
   LogOut,
+  Mail,
+  Send,
+  Megaphone,
+  Award,
 } from "lucide-react";
 import { useAuthStore } from "../../store/authStore";
 import { api } from "../../lib/api";
+import { NotificationBell } from "../notifications/NotificationBell";
 
 interface NavItem {
   to: string;
@@ -32,6 +37,8 @@ interface NavItem {
 const NAV_BY_ROLE: Record<string, NavItem[]> = {
   STUDENT: [
     { to: "/student", label: "Dashboard", icon: Home, end: true },
+    { to: "/student/inbox", label: "Inbox & Messages", icon: Mail },
+    { to: "/student/offers", label: "Offer Letters", icon: Award },
     { to: "/student/profile", label: "Profile & Skills", icon: User },
     { to: "/student/opportunities", label: "Opportunities", icon: Compass },
     { to: "/student/applications", label: "Applications", icon: FileText },
@@ -41,11 +48,13 @@ const NAV_BY_ROLE: Record<string, NavItem[]> = {
   ],
   COMPANY: [
     { to: "/company", label: "Dashboard", icon: Home, end: true },
+    { to: "/company/communications", label: "Communications & Offers", icon: Send },
     { to: "/company/jobs/new", label: "Post Job/Internship", icon: PenLine },
     { to: "/company/industry-expectations", label: "Industry Expectations", icon: BarChart3 },
   ],
   COLLEGE: [
     { to: "/college", label: "Dashboard", icon: Home, end: true },
+    { to: "/college/communications", label: "Placement Broadcasts", icon: Megaphone },
     { to: "/college/analytics", label: "Analytics", icon: TrendingUp },
     { to: "/college/collaboration", label: "Industry Collaboration", icon: Handshake },
   ],
@@ -140,13 +149,16 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           </span>
           SkillBridge <span className="text-gradient">AI</span>
         </span>
-        <button
-          onClick={() => setMobileOpen((o) => !o)}
-          className="rounded-lg p-2 text-ink-muted hover:bg-accent-50 hover:text-accent-700"
-          aria-label="Toggle navigation"
-        >
-          {mobileOpen ? <X size={20} /> : <Menu size={20} />}
-        </button>
+        <div className="flex items-center gap-2">
+          <NotificationBell />
+          <button
+            onClick={() => setMobileOpen((o) => !o)}
+            className="rounded-lg p-2 text-ink-muted hover:bg-accent-50 hover:text-accent-700"
+            aria-label="Toggle navigation"
+          >
+            {mobileOpen ? <X size={20} /> : <Menu size={20} />}
+          </button>
+        </div>
       </div>
 
       {/* Desktop sidebar */}
@@ -179,8 +191,31 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       </AnimatePresence>
 
       {/* Main content */}
-      <main className="min-w-0 flex-1">
-        <div className="mx-auto max-w-7xl p-6 md:p-10">{children}</div>
+      <main className="min-w-0 flex-1 flex flex-col">
+        {/* Desktop top header */}
+        <header className="hidden lg:flex sticky top-0 z-30 h-16 shrink-0 items-center justify-between border-b border-stroke bg-white/70 px-8 backdrop-blur-md">
+          <div className="flex items-center gap-2 text-xs text-ink-muted">
+            <span className="font-semibold text-ink">{user ? ROLE_LABEL[user.role] : "User"} Console</span>
+            <span>/</span>
+            <span className="rounded-full bg-surface-3 px-2.5 py-0.5 text-[11px] font-medium text-ink-faint">
+              Enterprise Academia-Industry Bridge
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <NotificationBell />
+            <div className="flex items-center gap-2.5 pl-3 border-l border-stroke">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-gradient text-xs font-bold text-white shadow-glow">
+                {user?.email?.[0]?.toUpperCase() ?? "U"}
+              </div>
+              <div className="text-right">
+                <p className="text-xs font-semibold text-ink leading-none">{user?.email?.split("@")[0]}</p>
+                <span className="text-[10px] text-ink-faint">{user ? ROLE_LABEL[user.role] : ""}</span>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <div className="mx-auto w-full max-w-7xl p-6 md:p-10 flex-1">{children}</div>
       </main>
     </div>
   );

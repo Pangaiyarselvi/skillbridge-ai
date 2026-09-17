@@ -15,6 +15,7 @@ router.put("/opportunities/:id", ctrl.updateOpportunity);
 router.delete("/opportunities/:id", ctrl.deleteOpportunity);
 
 // Applicant management + AI ranking
+router.get("/applicants", ctrl.listAllApplicants);
 router.get("/opportunities/:id/applicants", ctrl.listApplicants);
 router.patch("/applications/:id/status", ctrl.updateApplicationStatus);
 

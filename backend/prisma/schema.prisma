@@ -59,6 +59,30 @@ enum NotificationType {
   VERIFICATION
 }
 
+enum CommunicationCategory {
+  GENERAL
+  INTERVIEW_INVITATION
+  OFFER_LETTER
+  PLACEMENT_ANNOUNCEMENT
+  WORKSHOP
+  INTERNSHIP
+  TRAINING
+  PLACEMENT_DRIVE
+}
+
+enum CommunicationPriority {
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum OfferStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+}
+
 // ------------------------------------------------------------
 // CORE IDENTITY
 // ------------------------------------------------------------
@@ -83,9 +107,11 @@ model User {
   college   College?
   admin     Admin?
 
-  sentMessages      Message[]      @relation("MessageSender")
-  receivedMessages  Message[]      @relation("MessageReceiver")
-  notifications     Notification[]
+  sentMessages           Message[]       @relation("MessageSender")
+  receivedMessages       Message[]       @relation("MessageReceiver")
+  notifications          Notification[]
+  sentCommunications     Communication[] @relation("SentCommunications")
+  receivedCommunications Communication[] @relation("ReceivedCommunications")
 
   @@index([role])
 }
@@ -147,6 +173,7 @@ model Student {
   careerRoadmaps   CareerRoadmap[]
   chatSessions     ChatSession[]
   savedOpportunities SavedOpportunity[]
+  offerLetters     OfferLetter[]
 
   @@index([collegeId])
   @@index([department])
@@ -248,6 +275,7 @@ model Company {
   industryExpectations IndustryExpectation[]
   industrySkillDemands IndustrySkillDemand[]
   partnerships       IndustryPartnership[]
+  offerLetters       OfferLetter[]
 
   @@index([verificationStatus])
 }
@@ -275,6 +303,7 @@ model Opportunity {
   applications     Application[]
   savedBy          SavedOpportunity[]
   recommendations  Recommendation[]
+  offerLetters     OfferLetter[]
 
   @@index([companyId])
   @@index([type, isActive])
@@ -495,4 +524,59 @@ model Notification {
   createdAt DateTime         @default(now())
 
   @@index([userId, isRead])
+}
+
+// ------------------------------------------------------------
+// ENTERPRISE COMMUNICATION & OFFER LETTERS
+// ------------------------------------------------------------
+
+model Communication {
+  id             String                @id @default(uuid())
+  senderId       String
+  sender         User                  @relation("SentCommunications", fields: [senderId], references: [id], onDelete: Cascade)
+  recipientId    String?
+  recipient      User?                 @relation("ReceivedCommunications", fields: [recipientId], references: [id], onDelete: Cascade)
+  category       CommunicationCategory @default(GENERAL)
+  priority       CommunicationPriority @default(NORMAL)
+  subject        String
+  body           String
+  attachments    Json?                 // [{ name, url, size, type }]
+  metadata       Json?                 // interviewDetails, meetingLink, targeting: { department, graduationYear }
+  isRead         Boolean               @default(false)
+  isArchived     Boolean               @default(false)
+  offerLetterId  String?               @unique
+  offerLetter    OfferLetter?          @relation(fields: [offerLetterId], references: [id], onDelete: SetNull)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  @@index([recipientId, isRead])
+  @@index([category])
+  @@index([senderId])
+}
+
+model OfferLetter {
+  id             String        @id @default(uuid())
+  companyId      String
+  company        Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  studentId      String
+  student        Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  opportunityId  String?
+  opportunity    Opportunity?  @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  jobRole        String
+  salaryPackage  String        // e.g. "₹14.5 LPA", "₹40,000/month"
+  location       String?
+  joiningDate    DateTime?
+  validUntil     DateTime?
+  status         OfferStatus   @default(PENDING)
+  letterContent  String?       // structured terms, benefits, HTML/markdown body
+  documentUrl    String?       // generated/uploaded PDF document
+  declineReason  String?
+  acceptedAt     DateTime?
+  declinedAt     DateTime?
+  communication  Communication?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([studentId, status])
+  @@index([companyId])
 }

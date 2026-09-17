@@ -14,15 +14,19 @@ import StudentApplications from "./pages/student/Applications";
 import StudentAIHub from "./pages/student/AIHub";
 import StudentMentorChat from "./pages/student/MentorChat";
 import StudentMockInterview from "./pages/student/MockInterview";
+import StudentInbox from "./pages/student/Inbox";
+import StudentOfferCenter from "./pages/student/OfferCenter";
 
 import CompanyDashboard from "./pages/company/Dashboard";
 import CompanyJobPost from "./pages/company/JobPost";
 import CompanyApplicants from "./pages/company/Applicants";
 import CompanyExpectations from "./pages/company/IndustryExpectations";
+import CompanyCommunications from "./pages/company/CompanyCommunications";
 
 import CollegeDashboard from "./pages/college/Dashboard";
 import CollegeAnalytics from "./pages/college/Analytics";
 import CollegeCollaboration from "./pages/college/IndustryCollaboration";
+import CollegeCommunications from "./pages/college/CollegeCommunications";
 
 import AdminDashboard from "./pages/admin/Dashboard";
 import AdminUsers from "./pages/admin/Users";
@@ -43,6 +47,8 @@ export default function App() {
 
         <Route element={<ProtectedRoute allow={["STUDENT"]} />}>
           <Route path="/student" element={<StudentDashboard />} />
+          <Route path="/student/inbox" element={<StudentInbox />} />
+          <Route path="/student/offers" element={<StudentOfferCenter />} />
           <Route path="/student/profile" element={<StudentProfile />} />
           <Route path="/student/opportunities" element={<StudentOpportunities />} />
           <Route path="/student/applications" element={<StudentApplications />} />
@@ -53,6 +59,7 @@ export default function App() {
 
         <Route element={<ProtectedRoute allow={["COMPANY"]} />}>
           <Route path="/company" element={<CompanyDashboard />} />
+          <Route path="/company/communications" element={<CompanyCommunications />} />
           <Route path="/company/jobs/new" element={<CompanyJobPost />} />
           <Route path="/company/jobs/:id/applicants" element={<CompanyApplicants />} />
           <Route path="/company/industry-expectations" element={<CompanyExpectations />} />
@@ -60,6 +67,7 @@ export default function App() {
 
         <Route element={<ProtectedRoute allow={["COLLEGE"]} />}>
           <Route path="/college" element={<CollegeDashboard />} />
+          <Route path="/college/communications" element={<CollegeCommunications />} />
           <Route path="/college/analytics" element={<CollegeAnalytics />} />
           <Route path="/college/collaboration" element={<CollegeCollaboration />} />
         </Route>

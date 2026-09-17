@@ -486,3 +486,15 @@ export async function markNotificationRead(req: AuthedRequest, res: Response, ne
   }
 }
 
+export async function markAllNotificationsRead(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    await prisma.notification.updateMany({
+      where: { userId: req.user!.userId, isRead: false },
+      data: { isRead: true },
+    });
+    res.json({ success: true, message: "All notifications marked as read" });
+  } catch (err) {
+    next(err);
+  }
+}
+

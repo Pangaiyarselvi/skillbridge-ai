@@ -12,6 +12,8 @@ import companyRoutes from "./modules/company/company.routes";
 import collegeRoutes from "./modules/college/college.routes";
 import adminRoutes from "./modules/admin/admin.routes";
 import aiRoutes from "./modules/ai/ai.routes";
+import communicationRoutes from "./modules/communication/communication.routes";
+import offerRoutes from "./modules/communication/offer.routes";
 
 const app = express();
 
@@ -97,6 +99,8 @@ app.use("/api/companies", companyRoutes);
 app.use("/api/colleges", collegeRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/ai", aiRoutes);
+app.use("/api/communications", communicationRoutes);
+app.use("/api/offers", offerRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
