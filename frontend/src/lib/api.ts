@@ -3,13 +3,24 @@ import { useAuthStore } from "../store/authStore";
 
 function resolveBaseUrl(): string {
   const envUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
-  if (!envUrl) return "http://localhost:5000/api";
-
-  let clean = envUrl.replace(/\/+$/, "");
-  if (!clean.endsWith("/api") && !clean.includes("/api/")) {
-    clean = `${clean}/api`;
+  if (envUrl) {
+    let clean = envUrl.replace(/\/+$/, "");
+    if (!clean.endsWith("/api") && !clean.includes("/api/")) {
+      clean = `${clean}/api`;
+    }
+    return clean;
   }
-  return clean;
+
+  // Automatic production fallback: if running on Vercel or any live host
+  if (
+    typeof window !== "undefined" &&
+    window.location.hostname !== "localhost" &&
+    window.location.hostname !== "127.0.0.1"
+  ) {
+    return "https://skillbridge-ai-backend.onrender.com/api";
+  }
+
+  return "http://localhost:5000/api";
 }
 
 export const api = axios.create({
