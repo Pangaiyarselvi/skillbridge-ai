@@ -4,14 +4,15 @@
   "framework": "vite",
   "rewrites": [
     {
-      "source": "/api/:match*",
-      "destination": "https://skillbridge-ai-backend.onrender.com/api/:match*"
+      "source": "/api/:path*",
+      "destination": "https://skillbridge-ai-backend.onrender.com/api/:path*"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
   ],
+
   "headers": [
     {
       "source": "/(.*)",
