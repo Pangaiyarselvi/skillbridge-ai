@@ -2,6 +2,7 @@ import { Response, NextFunction } from "express";
 import { AuthedRequest } from "../../middlewares/auth";
 import { prisma } from "../../config/prisma";
 import { AppError } from "../../middlewares/errorHandler";
+import { sendOfferLetterEmail } from "../../utils/mailer";
 
 export async function listOffers(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
@@ -242,7 +243,26 @@ export async function createOffer(req: AuthedRequest, res: Response, next: NextF
           link: "/student/offers",
         },
       });
+
+      // Send real email to student's registered email address
+      if (student.user?.email) {
+        sendOfferLetterEmail({
+          to: student.user.email,
+          studentName: student.fullName,
+          companyName: company.name,
+          companyLogo: company.logoUrl,
+          jobRole,
+          salaryPackage,
+          location: location || "Hybrid / Mentioned in Letter",
+          joiningDate,
+          validUntil,
+          offerId: offer.id,
+        }).catch((err) => {
+          console.error(`[Mailer] Error triggering real offer letter email to ${student.user.email}:`, err);
+        });
+      }
     }
+
 
     res.status(201).json({
       success: true,

@@ -3,6 +3,7 @@ import { AuthedRequest } from "../../middlewares/auth";
 import { prisma } from "../../config/prisma";
 import { AppError } from "../../middlewares/errorHandler";
 import { groqJSON } from "../../config/groq";
+import { sendEmail } from "../../utils/mailer";
 
 // ------------------------------------------------------------------
 // Communication Inbox & Management
@@ -271,6 +272,35 @@ export async function sendMessage(req: AuthedRequest, res: Response, next: NextF
             link: category === "OFFER_LETTER" ? "/student/offers" : `/student/inbox?id=${comm.id}`,
           },
         });
+
+        // Also send real email if recipient has a registered email
+        const recipientUser = await prisma.user.findUnique({
+          where: { id: recId },
+          select: { email: true },
+        });
+
+        if (recipientUser?.email) {
+          const appUrl = (process.env.APP_URL || "https://skillbridge-ai.vercel.app").replace(/\/+$/, "");
+          const linkUrl = category === "OFFER_LETTER" ? `${appUrl}/student/offers` : `${appUrl}/student/inbox?id=${comm.id}`;
+          sendEmail({
+            to: recipientUser.email,
+            subject: `[SkillBridge AI] ${subject}`,
+            html: `
+              <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+                <div style="border-bottom: 2px solid #4f46e5; padding-bottom: 12px; margin-bottom: 20px;">
+                  <h2 style="color: #0f172a; margin: 0; font-size: 20px;">SkillBridge <span style="color: #4f46e5;">AI</span></h2>
+                  <p style="color: #64748b; margin: 4px 0 0 0; font-size: 12px;">New Notification from <strong>${senderName}</strong></p>
+                </div>
+                <h3 style="color: #0f172a; font-size: 16px; margin: 0 0 12px 0;">${subject}</h3>
+                <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #edf2f7; color: #334155; font-size: 14px; line-height: 1.6; white-space: pre-wrap; margin-bottom: 24px;">${body}</div>
+                <div style="text-align: center; margin-bottom: 24px;">
+                  <a href="${linkUrl}" style="background: #4f46e5; color: #ffffff; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600; display: inline-block;">Open in SkillBridge AI &rarr;</a>
+                </div>
+                <p style="font-size: 11px; color: #94a3b8; text-align: center; border-top: 1px solid #f1f5f9; padding-top: 16px; margin: 0;">Verified message sent via SkillBridge AI Platform</p>
+              </div>
+            `,
+          }).catch((err) => console.error(`[Mailer] Error sending message email to ${recipientUser.email}:`, err));
+        }
 
         return comm;
       })
