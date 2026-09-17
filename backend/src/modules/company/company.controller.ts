@@ -1,6 +1,7 @@
 import { Response, NextFunction } from "express";
 import { AuthedRequest } from "../../middlewares/auth";
 import { prisma } from "../../config/prisma";
+import { sendOfferLetterEmail } from "../../utils/mailer";
 
 async function getCompany(userId: string) {
   return prisma.company.findUniqueOrThrow({ where: { userId } });
@@ -104,6 +105,58 @@ export async function updateApplicationStatus(req: AuthedRequest, res: Response,
         body: `Your application status changed to ${status}`,
       },
     });
+
+    // If status changed to OFFERED, save offer letter and dispatch real email
+    if (status === "OFFERED") {
+      const fullApp = await prisma.application.findUnique({
+        where: { id: application.id },
+        include: {
+          student: { include: { user: true } },
+          opportunity: { include: { company: true } },
+        },
+      });
+
+      if (fullApp && fullApp.student?.user?.email) {
+        const salary = req.body.salaryPackage || fullApp.opportunity.stipendOrSalary || "Competitive Package";
+        const loc = req.body.location || fullApp.opportunity.location || (fullApp.opportunity.isRemote ? "Remote" : "Hybrid");
+
+        // 1. Save or retrieve offer letter in database
+        let offer = await prisma.offerLetter.findFirst({
+          where: { studentId: fullApp.studentId, opportunityId: fullApp.opportunityId },
+        });
+
+        if (!offer) {
+          offer = await prisma.offerLetter.create({
+            data: {
+              companyId: fullApp.opportunity.companyId,
+              studentId: fullApp.studentId,
+              opportunityId: fullApp.opportunityId,
+              jobRole: fullApp.opportunity.title,
+              salaryPackage: salary,
+              location: loc,
+              documentUrl: req.body.documentUrl || null,
+              status: "PENDING",
+              letterContent: `OFFICIAL OFFER OF EMPLOYMENT\n\nDear ${fullApp.student.fullName},\n\nWe are pleased to inform you that you have received an offer from ${fullApp.opportunity.company.name} for the position of ${fullApp.opportunity.title}.\n\nPackage: ${salary}\nLocation: ${loc}\n\nPlease log in to SkillBridge AI to view and download your offer letter.\n\nBest Regards,\nSkillBridge AI Team`,
+            },
+          });
+        }
+
+        // 2. Send email to student's registered email address
+        sendOfferLetterEmail({
+          to: fullApp.student.user.email,
+          studentName: fullApp.student.fullName,
+          companyName: fullApp.opportunity.company.name,
+          companyLogo: fullApp.opportunity.company.logoUrl,
+          jobRole: fullApp.opportunity.title,
+          salaryPackage: salary,
+          location: loc,
+          documentUrl: req.body.documentUrl || offer.documentUrl,
+          offerId: offer.id,
+        }).catch((err) => {
+          console.error(`[Mailer] Error sending offer email to ${fullApp.student.user.email}:`, err);
+        });
+      }
+    }
 
     res.json({ success: true, data: application });
   } catch (err) { next(err); }

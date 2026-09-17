@@ -26,6 +26,7 @@ export async function sendEmail(opts: {
   subject: string;
   html: string;
   text?: string;
+  attachments?: any[];
 }) {
   if (process.env.NODE_ENV === "test") return { success: true, test: true };
 
@@ -54,6 +55,7 @@ export async function sendEmail(opts: {
       subject: opts.subject,
       text: opts.text || opts.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
       html: opts.html,
+      ...(opts.attachments && opts.attachments.length > 0 && { attachments: opts.attachments }),
     });
 
     console.log(`[Mailer] ✅ Real email successfully sent to ${opts.to} (MessageId: ${info.messageId})`);
@@ -74,30 +76,38 @@ export interface OfferEmailParams {
   location?: string | null;
   joiningDate?: string | Date | null;
   validUntil?: string | Date | null;
+  documentUrl?: string | null;
   offerId?: string;
+  attachments?: any[];
 }
 
 export async function sendOfferLetterEmail(params: OfferEmailParams) {
   const appUrl = (process.env.APP_URL || "https://skillbridge-ai.vercel.app").replace(/\/+$/, "");
   const offerUrl = `${appUrl}/student/offers`;
+  const locationStr = params.location || "As per offer terms";
 
-  const joiningStr = params.joiningDate
-    ? new Date(params.joiningDate).toLocaleDateString("en-US", {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      })
-    : "Mutually agreed upon";
+  // Subject as strictly requested
+  const subject = `Congratulations! Job Offer from ${params.companyName}`;
 
-  const deadlineStr = params.validUntil
-    ? new Date(params.validUntil).toLocaleDateString("en-US", {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      })
-    : "Within 7 business days";
+  // Plain-text as strictly requested
+  const text = `Dear ${params.studentName},
 
-  const subject = `🎉 Congratulations! Job Offer from ${params.companyName} for ${params.jobRole}`;
+Congratulations!
+
+We are pleased to inform you that you have received an offer from ${params.companyName} for the position of ${params.jobRole}.
+
+Package: ${params.salaryPackage}
+Location: ${locationStr}
+
+Please log in to SkillBridge AI to view and download your offer letter: ${offerUrl}
+
+Best Regards,
+SkillBridge AI Team`;
+
+  // Professional responsive HTML email template
+  const logoHtml = params.companyLogo
+    ? `<img src="${params.companyLogo}" alt="${params.companyName}" style="max-height: 48px; max-width: 180px; object-fit: contain; margin-bottom: 16px;" />`
+    : `<div style="display: inline-block; padding: 10px 18px; background: linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%); color: #ffffff; font-weight: bold; font-size: 18px; border-radius: 8px; margin-bottom: 16px;">${params.companyName}</div>`;
 
   const html = `
 <!DOCTYPE html>
@@ -111,87 +121,71 @@ export async function sendOfferLetterEmail(params: OfferEmailParams) {
     .wrapper { width: 100%; background-color: #f1f5f9; padding: 40px 15px; box-sizing: border-box; }
     .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08); border: 1px solid #e2e8f0; }
     .header-bar { height: 6px; background: linear-gradient(90deg, #4f46e5 0%, #06b6d4 100%); }
-    .brand-header { padding: 24px 32px; background: #ffffff; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; justify-content: space-between; }
-    .brand-title { font-size: 18px; font-weight: 700; color: #0f172a; letter-spacing: -0.5px; }
-    .brand-title span { color: #4f46e5; }
     .content-body { padding: 36px 32px; }
-    .badge { display: inline-block; padding: 6px 12px; background: #ecfdf5; color: #059669; font-size: 12px; font-weight: 700; border-radius: 9999px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 16px; }
-    .headline { font-size: 24px; font-weight: 800; color: #0f172a; margin: 0 0 12px 0; line-height: 1.3; }
-    .intro { font-size: 15px; color: #475569; line-height: 1.6; margin-bottom: 24px; }
-    .offer-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-bottom: 28px; }
-    .card-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #edf2f7; font-size: 14px; }
-    .card-row:last-child { border-bottom: none; }
-    .card-label { color: #64748b; font-weight: 500; }
-    .card-value { color: #0f172a; font-weight: 700; text-align: right; }
-    .cta-container { text-align: center; margin: 32px 0 20px 0; }
+    .headline { font-size: 22px; font-weight: 800; color: #0f172a; margin: 0 0 16px 0; }
+    .paragraph { font-size: 15px; color: #334155; line-height: 1.6; margin: 0 0 16px 0; }
+    .offer-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin: 24px 0; }
+    .detail-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #edf2f7; font-size: 14px; }
+    .detail-row:last-child { border-bottom: none; }
+    .label { color: #64748b; font-weight: 500; }
+    .val { color: #0f172a; font-weight: 700; text-align: right; }
+    .cta-container { text-align: center; margin: 32px 0 24px 0; }
     .cta-button { display: inline-block; background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); color: #ffffff !important; text-decoration: none; font-size: 15px; font-weight: 600; padding: 14px 32px; border-radius: 10px; box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35); text-align: center; }
-    .footer { padding: 24px 32px; background: #f8fafc; border-top: 1px solid #f1f5f9; text-align: center; font-size: 12px; color: #94a3b8; line-height: 1.5; }
+    .signoff { font-size: 15px; color: #334155; line-height: 1.6; margin-top: 24px; border-top: 1px solid #f1f5f9; padding-top: 20px; }
+    .footer { padding: 20px 32px; background: #f8fafc; border-top: 1px solid #f1f5f9; text-align: center; font-size: 12px; color: #94a3b8; }
   </style>
 </head>
 <body>
   <div class="wrapper">
     <div class="container">
       <div class="header-bar"></div>
-      
-      <div class="brand-header">
-        <div class="brand-title">SkillBridge <span>AI</span></div>
-        <div style="font-size: 12px; font-weight: 600; color: #64748b;">OFFICIAL NOTICE</div>
-      </div>
-
       <div class="content-body">
-        <span class="badge">🎉 Offer Letter Issued</span>
-        <h1 class="headline">Congratulations, ${params.studentName}!</h1>
-        <p class="intro">
-          We are pleased to notify you that <strong>${params.companyName}</strong> has officially extended an employment offer for the role of <strong>${params.jobRole}</strong> via SkillBridge AI.
+        ${logoHtml}
+
+        <p class="paragraph" style="font-size: 16px;">Dear <strong>${params.studentName}</strong>,</p>
+
+        <h1 class="headline">Congratulations!</h1>
+
+        <p class="paragraph">
+          We are pleased to inform you that you have received an offer from <strong>${params.companyName}</strong> for the position of <strong>${params.jobRole}</strong>.
         </p>
 
         <div class="offer-card">
           <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse;">
             <tr style="border-bottom: 1px solid #edf2f7;">
-              <td style="padding: 10px 0; color: #64748b; font-size: 14px; font-weight: 500;">Company</td>
-              <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 700; text-align: right;">${params.companyName}</td>
+              <td style="padding: 8px 0; color: #64748b; font-size: 14px; font-weight: 500;">Position:</td>
+              <td style="padding: 8px 0; color: #0f172a; font-size: 14px; font-weight: 700; text-align: right;">${params.jobRole}</td>
             </tr>
             <tr style="border-bottom: 1px solid #edf2f7;">
-              <td style="padding: 10px 0; color: #64748b; font-size: 14px; font-weight: 500;">Role & Designation</td>
-              <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 700; text-align: right;">${params.jobRole}</td>
-            </tr>
-            <tr style="border-bottom: 1px solid #edf2f7;">
-              <td style="padding: 10px 0; color: #64748b; font-size: 14px; font-weight: 500;">Annual Compensation</td>
-              <td style="padding: 10px 0; color: #059669; font-size: 15px; font-weight: 800; text-align: right;">${params.salaryPackage}</td>
-            </tr>
-            <tr style="border-bottom: 1px solid #edf2f7;">
-              <td style="padding: 10px 0; color: #64748b; font-size: 14px; font-weight: 500;">Location</td>
-              <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 600; text-align: right;">${params.location || "Hybrid / Mentioned in Letter"}</td>
-            </tr>
-            <tr style="border-bottom: 1px solid #edf2f7;">
-              <td style="padding: 10px 0; color: #64748b; font-size: 14px; font-weight: 500;">Expected Joining</td>
-              <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 600; text-align: right;">${joiningStr}</td>
+              <td style="padding: 8px 0; color: #64748b; font-size: 14px; font-weight: 500;">Package:</td>
+              <td style="padding: 8px 0; color: #059669; font-size: 15px; font-weight: 800; text-align: right;">${params.salaryPackage}</td>
             </tr>
             <tr>
-              <td style="padding: 10px 0; color: #dc2626; font-size: 14px; font-weight: 500;">Decision Deadline</td>
-              <td style="padding: 10px 0; color: #dc2626; font-size: 14px; font-weight: 700; text-align: right;">${deadlineStr}</td>
+              <td style="padding: 8px 0; color: #64748b; font-size: 14px; font-weight: 500;">Location:</td>
+              <td style="padding: 8px 0; color: #0f172a; font-size: 14px; font-weight: 600; text-align: right;">${locationStr}</td>
             </tr>
           </table>
         </div>
 
-        <p style="font-size: 14px; color: #475569; line-height: 1.6;">
-          Please review the full official terms, compensation structure, and sign or respond to the offer through your secure SkillBridge AI Offer Center.
+        <p class="paragraph">
+          Please log in to SkillBridge AI to view and download your offer letter.
         </p>
 
         <div class="cta-container">
           <a href="${offerUrl}" class="cta-button">
-            View & Accept Offer Letter &rarr;
+            Download Offer Letter &rarr;
           </a>
         </div>
 
-        <p style="font-size: 12px; color: #94a3b8; text-align: center; margin-top: 20px;">
-          Direct link: <a href="${offerUrl}" style="color: #4f46e5;">${offerUrl}</a>
-        </p>
+        <div class="signoff">
+          Best Regards,<br />
+          <strong>SkillBridge AI Team</strong>
+        </div>
       </div>
 
       <div class="footer">
-        <p style="margin: 0 0 6px 0;">This email was sent to <strong>${params.to}</strong> as part of the SkillBridge AI Academia-Industry Talent Network.</p>
-        <p style="margin: 0;">&copy; ${new Date().getFullYear()} SkillBridge AI. Verified Corporate Communications.</p>
+        <p style="margin: 0 0 4px 0;">Official Offer Notification &bull; SkillBridge AI Academia-Industry Bridge</p>
+        <p style="margin: 0;">Sent to ${params.to}</p>
       </div>
     </div>
   </div>
@@ -199,11 +193,25 @@ export async function sendOfferLetterEmail(params: OfferEmailParams) {
 </html>
   `;
 
+  // Attach PDF if available
+  const emailAttachments: any[] = [];
+  if (params.attachments && Array.isArray(params.attachments)) {
+    emailAttachments.push(...params.attachments);
+  } else if (params.documentUrl) {
+    emailAttachments.push({
+      filename: `Offer_Letter_${params.companyName.replace(/[^a-zA-Z0-9]/g, "_")}.pdf`,
+      path: params.documentUrl,
+    });
+  }
+
   return sendEmail({
     to: params.to,
     subject,
+    text,
     html,
+    attachments: emailAttachments.length > 0 ? emailAttachments : undefined,
   });
 }
+
 
 

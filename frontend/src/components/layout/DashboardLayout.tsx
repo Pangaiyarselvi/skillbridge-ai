@@ -18,14 +18,9 @@ import {
   Menu,
   X,
   LogOut,
-  Mail,
-  Send,
-  Megaphone,
-  Award,
 } from "lucide-react";
 import { useAuthStore } from "../../store/authStore";
 import { api } from "../../lib/api";
-import { NotificationBell } from "../notifications/NotificationBell";
 
 interface NavItem {
   to: string;
@@ -40,21 +35,17 @@ const NAV_BY_ROLE: Record<string, NavItem[]> = {
     { to: "/student/profile", label: "Profile & Skills", icon: User },
     { to: "/student/opportunities", label: "Opportunities", icon: Compass },
     { to: "/student/applications", label: "Applications", icon: FileText },
-    { to: "/student/offers", label: "Offer Letters", icon: Award },
-    { to: "/student/inbox", label: "Inbox & Messages", icon: Mail },
     { to: "/student/ai-hub", label: "AI Career Hub", icon: Sparkles },
     { to: "/student/mentor", label: "Mentor Chat", icon: MessageSquare },
     { to: "/student/mock-interview", label: "Mock Interview", icon: Mic },
   ],
   COMPANY: [
     { to: "/company", label: "Dashboard", icon: Home, end: true },
-    { to: "/company/communications", label: "Communications & Offers", icon: Send },
     { to: "/company/jobs/new", label: "Post Job/Internship", icon: PenLine },
     { to: "/company/industry-expectations", label: "Industry Expectations", icon: BarChart3 },
   ],
   COLLEGE: [
     { to: "/college", label: "Dashboard", icon: Home, end: true },
-    { to: "/college/communications", label: "Placement Broadcasts", icon: Megaphone },
     { to: "/college/analytics", label: "Analytics", icon: TrendingUp },
     { to: "/college/collaboration", label: "Industry Collaboration", icon: Handshake },
   ],
@@ -90,18 +81,14 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
   const sidebarContent = (
     <>
-      <div className="flex h-16 shrink-0 items-center justify-between border-b border-stroke px-5">
-        <div className="flex items-center gap-2">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-gradient text-sm font-bold text-white shadow-glow">
-            S
-          </span>
-          <span className="font-display text-lg font-semibold tracking-tight text-ink">
-            SkillBridge <span className="text-gradient">AI</span>
-          </span>
-        </div>
-        <NotificationBell />
+      <div className="flex h-16 shrink-0 items-center gap-2 border-b border-stroke px-6">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-gradient text-sm font-bold text-white shadow-glow">
+          S
+        </span>
+        <span className="font-display text-lg font-semibold tracking-tight text-ink">
+          SkillBridge <span className="text-gradient">AI</span>
+        </span>
       </div>
-
       <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-4">
         {items.map((item) => (
           <NavLink
@@ -153,16 +140,13 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           </span>
           SkillBridge <span className="text-gradient">AI</span>
         </span>
-        <div className="flex items-center gap-2">
-          <NotificationBell />
-          <button
-            onClick={() => setMobileOpen((o) => !o)}
-            className="rounded-lg p-2 text-ink-muted hover:bg-accent-50 hover:text-accent-700"
-            aria-label="Toggle navigation"
-          >
-            {mobileOpen ? <X size={20} /> : <Menu size={20} />}
-          </button>
-        </div>
+        <button
+          onClick={() => setMobileOpen((o) => !o)}
+          className="rounded-lg p-2 text-ink-muted hover:bg-accent-50 hover:text-accent-700"
+          aria-label="Toggle navigation"
+        >
+          {mobileOpen ? <X size={20} /> : <Menu size={20} />}
+        </button>
       </div>
 
       {/* Desktop sidebar */}
@@ -201,4 +185,3 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     </div>
   );
 }
-
