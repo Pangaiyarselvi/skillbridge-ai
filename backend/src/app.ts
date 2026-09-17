@@ -31,33 +31,14 @@ const allowedOrigins = (process.env.CORS_ORIGIN || "")
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps, curl, server-to-server)
-      if (!origin) return callback(null, true);
-
-      const normalizedOrigin = origin.replace(/\/+$/, "");
-
-      // In development or if allowedOrigins is empty, allow all origins
-      if (process.env.NODE_ENV !== "production" || allowedOrigins.length === 0) {
-        return callback(null, true);
-      }
-
-      // Check against configured allowed origins or localhost
-      if (
-        allowedOrigins.includes(normalizedOrigin) ||
-        normalizedOrigin.includes("localhost") ||
-        normalizedOrigin.includes("127.0.0.1") ||
-        normalizedOrigin.endsWith(".vercel.app")
-      ) {
-        return callback(null, true);
-      }
-
-      callback(null, true); // Permissive fallback to prevent deployment lockouts while supporting credentials
+      callback(null, origin || true);
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
   })
 );
+
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));

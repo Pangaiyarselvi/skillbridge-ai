@@ -11,13 +11,13 @@ function resolveBaseUrl(): string {
     return clean;
   }
 
-  // Automatic production fallback: if running on Vercel or any live host
+  // When deployed on Vercel or live web host, use relative /api (proxied via vercel.json rewrite)
   if (
     typeof window !== "undefined" &&
     window.location.hostname !== "localhost" &&
     window.location.hostname !== "127.0.0.1"
   ) {
-    return "https://skillbridge-ai-backend.onrender.com/api";
+    return "/api";
   }
 
   return "http://localhost:5000/api";
@@ -25,8 +25,8 @@ function resolveBaseUrl(): string {
 
 export const api = axios.create({
   baseURL: resolveBaseUrl(),
-  withCredentials: true, // sends refreshToken httpOnly cookie when available
 });
+
 
 api.interceptors.request.use((config) => {
   const token = useAuthStore.getState().accessToken;
