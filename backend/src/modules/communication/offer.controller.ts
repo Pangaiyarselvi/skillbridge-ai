@@ -256,12 +256,15 @@ export async function createOffer(req: AuthedRequest, res: Response, next: NextF
           location: location || "Hybrid / Mentioned in Letter",
           joiningDate,
           validUntil,
+          documentUrl: documentUrl || offer.documentUrl,
+          attachments: req.body.attachments || undefined,
           offerId: offer.id,
         }).catch((err) => {
           console.error(`[Mailer] Error triggering real offer letter email to ${student.user.email}:`, err);
         });
       }
     }
+
 
 
     res.status(201).json({

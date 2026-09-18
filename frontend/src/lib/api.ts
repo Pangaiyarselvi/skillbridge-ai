@@ -85,6 +85,20 @@ api.interceptors.response.use(
         isRefreshing = false;
       }
     }
+
+    // Proxy fallback: If relative /api fails with 404 or Network Error on live host, retry directly via Render backend URL once
+    if (
+      (!error.response || error.response.status === 404) &&
+      !original._fallbackAttempted &&
+      typeof window !== "undefined" &&
+      window.location.hostname !== "localhost" &&
+      window.location.hostname !== "127.0.0.1"
+    ) {
+      original._fallbackAttempted = true;
+      original.baseURL = "https://skillbridge-ai-backend.onrender.com/api";
+      return api(original);
+    }
+
     return Promise.reject(error);
   }
 );
