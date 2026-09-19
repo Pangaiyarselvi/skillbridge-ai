@@ -60,7 +60,7 @@ export async function createOpportunity(req: AuthedRequest, res: Response, next:
       },
     });
 
-    const { indexOpportunity } = await import("../ai/vectorStore.service");
+    const { indexOpportunity } = await import("../ai/vectorStore.service.js");
     indexOpportunity(opportunity as any).catch(() => {}); // fire-and-forget vector indexing
 
     res.status(201).json({ success: true, data: opportunity });
@@ -83,7 +83,7 @@ export async function deleteOpportunity(req: AuthedRequest, res: Response, next:
 
 export async function listApplicants(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
-    const { rankCandidatesForOpportunity } = await import("../ai/matching.service");
+    const { rankCandidatesForOpportunity } = await import("../ai/matching.service.js");
     const ranked = await rankCandidatesForOpportunity(req.params.id);
     res.json({ success: true, data: ranked });
   } catch (err) { next(err); }

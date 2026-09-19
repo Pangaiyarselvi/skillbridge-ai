@@ -395,7 +395,7 @@ export async function applyToOpportunity(req: AuthedRequest, res: Response, next
 
     let matchScore = 50;
     try {
-      const { computeMatchScore } = await import("../ai/matching.service");
+      const { computeMatchScore } = await import("../ai/matching.service.js");
       const match = await computeMatchScore(student.id, req.params.id);
       matchScore = match.score;
     } catch {
