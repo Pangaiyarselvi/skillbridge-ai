@@ -9,7 +9,21 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "typeRoots": [
+      "./node_modules/@types"
+    ],
+    "types": [
+      "node",
+      "express",
+      "cors",
+      "cookie-parser",
+      "multer",
+      "jsonwebtoken",
+      "bcryptjs",
+      "nodemailer",
+      "pdf-parse"
+    ]
   },
   "include": ["src/**/*"]
 }
