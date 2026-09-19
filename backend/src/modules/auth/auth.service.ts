@@ -10,6 +10,11 @@ export async function signup(input: {
   password: string;
   role: "STUDENT" | "COMPANY" | "COLLEGE";
   fullName: string;
+  collegeId?: string | null;
+  branch?: string | null;
+  phone?: string | null;
+  cgpa?: number | null;
+  graduationYear?: number | null;
 }) {
   const normalizedEmail = input.email.trim().toLowerCase();
   const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
@@ -18,6 +23,10 @@ export async function signup(input: {
   const passwordHash = await bcrypt.hash(input.password, 12);
   const emailVerifyToken = crypto.randomBytes(32).toString("hex");
 
+  const cleanCollegeId = input.collegeId && input.collegeId.trim() !== "" ? input.collegeId.trim() : null;
+  const cleanBranch = input.branch && input.branch.trim() !== "" ? input.branch.trim() : null;
+  const cleanPhone = input.phone && input.phone.trim() !== "" ? input.phone.trim() : null;
+
   const user = await prisma.user.create({
     data: {
       email: normalizedEmail,
@@ -25,7 +34,19 @@ export async function signup(input: {
       role: input.role,
       isEmailVerified: true,
       emailVerifyToken,
-      ...(input.role === "STUDENT" && { student: { create: { fullName: input.fullName } } }),
+      ...(input.role === "STUDENT" && {
+        student: {
+          create: {
+            fullName: input.fullName,
+            collegeId: cleanCollegeId,
+            branch: cleanBranch,
+            department: cleanBranch,
+            phone: cleanPhone,
+            cgpa: input.cgpa != null ? Number(input.cgpa) : null,
+            graduationYear: input.graduationYear != null ? Number(input.graduationYear) : null,
+          },
+        },
+      }),
       ...(input.role === "COMPANY" && { company: { create: { name: input.fullName } } }),
       ...(input.role === "COLLEGE" && { college: { create: { name: input.fullName } } }),
     },

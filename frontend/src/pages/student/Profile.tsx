@@ -3,6 +3,7 @@ import { api } from "../../lib/api";
 import { useToast, extractErrorMessage } from "../../lib/toast";
 import DashboardLayout from "../../components/layout/DashboardLayout";
 import { Badge, Button, Card, FullPageSpinner, Input, Label, PageHeader, Select } from "../../components/ui";
+import { STANDARD_BRANCHES } from "../../lib/constants";
 
 interface StudentSkill {
   id: string;
@@ -27,7 +28,15 @@ export default function StudentProfile() {
         api.get("/students/colleges"),
       ]);
       setProfile(profileRes.data.data);
-      setColleges(collegesRes.data.data ?? []);
+      const rawColleges = collegesRes.data.data ?? [];
+      const seen = new Set<string>();
+      const deduplicated = rawColleges.filter((c: any) => {
+        const key = c.name.trim().toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      setColleges(deduplicated);
     } catch (err) {
       push(extractErrorMessage(err), "error");
     } finally {
@@ -41,6 +50,26 @@ export default function StudentProfile() {
 
   async function saveProfile(e: FormEvent) {
     e.preventDefault();
+
+    if (profile.phone && !/^[0-9+\s\-()]{7,25}$/.test(profile.phone.trim())) {
+      push("Please enter a valid phone number", "error");
+      return;
+    }
+    if (profile.cgpa !== null && profile.cgpa !== undefined && profile.cgpa !== "") {
+      const numCgpa = Number(profile.cgpa);
+      if (isNaN(numCgpa) || numCgpa < 0 || numCgpa > 10) {
+        push("CGPA must be a valid number between 0 and 10", "error");
+        return;
+      }
+    }
+    if (profile.graduationYear !== null && profile.graduationYear !== undefined && profile.graduationYear !== "") {
+      const numYear = Number(profile.graduationYear);
+      if (isNaN(numYear) || numYear < 2000 || numYear > 2040) {
+        push("Graduation year must be between 2000 and 2040", "error");
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       const {
@@ -63,9 +92,9 @@ export default function StudentProfile() {
         fullName,
         phone: phone || null,
         bio: bio || null,
-        department: department || null,
+        department: department || branch || null,
         degree: degree || null,
-        branch: branch || null,
+        branch: branch || department || null,
         collegeId: collegeId && collegeId !== "" ? collegeId : null,
         currentSemester: currentSemester ? Number(currentSemester) : null,
         cgpa: cgpa ? Number(cgpa) : null,
@@ -103,12 +132,25 @@ export default function StudentProfile() {
 
   async function addSkill(e: FormEvent) {
     e.preventDefault();
-    if (!skillName.trim()) return;
+    const cleanName = skillName.trim();
+    if (!cleanName) return;
+
+    const exists = (profile.skills ?? []).some(
+      (s: StudentSkill) => s.skill?.name?.toLowerCase() === cleanName.toLowerCase()
+    );
+    if (exists) {
+      push(`Skill "${cleanName}" is already added`, "error");
+      return;
+    }
+
     try {
-      const { data } = await api.post("/students/me/skills", { name: skillName.trim(), proficiency });
+      const { data } = await api.post("/students/me/skills", { name: cleanName, proficiency });
       setProfile((p: any) => ({
         ...p,
-        skills: [...(p.skills ?? []).filter((s: StudentSkill) => s.skill.name !== skillName.trim()), data.data],
+        skills: [
+          ...(p.skills ?? []).filter((s: StudentSkill) => s.skill?.name?.toLowerCase() !== cleanName.toLowerCase()),
+          data.data,
+        ],
       }));
       setSkillName("");
       push("Skill added", "success");
@@ -145,8 +187,19 @@ export default function StudentProfile() {
               <Input value={profile.phone ?? ""} onChange={(e) => setProfile({ ...profile, phone: e.target.value })} />
             </div>
             <div>
-              <Label>Department</Label>
-              <Input value={profile.department ?? ""} onChange={(e) => setProfile({ ...profile, department: e.target.value })} />
+              <Label>Branch</Label>
+              <Select
+                value={profile.branch ?? ""}
+                onChange={(e) => setProfile({ ...profile, branch: e.target.value, department: e.target.value })}
+              >
+                <option value="">Select a branch</option>
+                {STANDARD_BRANCHES.map((b) => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+                {profile.branch && !STANDARD_BRANCHES.includes(profile.branch as any) && (
+                  <option value={profile.branch}>{profile.branch}</option>
+                )}
+              </Select>
             </div>
             <div>
               <Label>Degree</Label>
@@ -233,9 +286,9 @@ export default function StudentProfile() {
           {(profile.skills ?? []).length === 0 && <p className="text-sm text-ink-faint">No skills added yet.</p>}
           {(profile.skills ?? []).map((s: StudentSkill) => (
             <span key={s.id} className="flex items-center gap-2 rounded-full bg-surface-3 px-3 py-1.5 text-sm text-ink">
-              {s.skill.name}
+              {s.skill?.name || "Skill"}
               <Badge tone="brand">{s.proficiency}</Badge>
-              <button onClick={() => removeSkill(s.skill.id)} className="text-ink-faint hover:text-danger" aria-label={`Remove ${s.skill.name}`}>
+              <button onClick={() => removeSkill(s.skill?.id || s.id)} className="text-ink-faint hover:text-danger" aria-label={`Remove ${s.skill?.name || "Skill"}`}>
                 ×
               </button>
             </span>

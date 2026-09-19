@@ -31,7 +31,14 @@ export async function listColleges(_req: AuthedRequest, res: Response, next: Nex
       orderBy: { name: "asc" },
       select: { id: true, name: true, code: true, verificationStatus: true },
     });
-    res.json({ success: true, data: colleges });
+    const seen = new Set<string>();
+    const deduplicated = colleges.filter((c) => {
+      const norm = c.name.trim().toLowerCase();
+      if (seen.has(norm)) return false;
+      seen.add(norm);
+      return true;
+    });
+    res.json({ success: true, data: deduplicated });
   } catch (err) {
     next(err);
   }
@@ -75,7 +82,13 @@ export async function updateProfile(req: AuthedRequest, res: Response, next: Nex
 
     const dataToUpdate: any = {};
     if (fullName !== undefined) dataToUpdate.fullName = fullName;
-    if (phone !== undefined) dataToUpdate.phone = phone || null;
+    if (phone !== undefined) {
+      const trimmedPhone = typeof phone === "string" ? phone.trim() : null;
+      if (trimmedPhone && !/^[0-9+\s\-()]{7,25}$/.test(trimmedPhone)) {
+        throw new AppError("Invalid phone number format", 400);
+      }
+      dataToUpdate.phone = trimmedPhone || null;
+    }
     if (bio !== undefined) dataToUpdate.bio = bio || null;
     if (department !== undefined) dataToUpdate.department = department || null;
     if (degree !== undefined) dataToUpdate.degree = degree || null;
@@ -84,10 +97,26 @@ export async function updateProfile(req: AuthedRequest, res: Response, next: Nex
       dataToUpdate.currentSemester = currentSemester ? Number(currentSemester) : null;
     }
     if (cgpa !== undefined) {
-      dataToUpdate.cgpa = cgpa ? Number(cgpa) : null;
+      if (cgpa !== null && cgpa !== "") {
+        const numCgpa = Number(cgpa);
+        if (isNaN(numCgpa) || numCgpa < 0 || numCgpa > 10) {
+          throw new AppError("CGPA must be a valid number between 0 and 10", 400);
+        }
+        dataToUpdate.cgpa = numCgpa;
+      } else {
+        dataToUpdate.cgpa = null;
+      }
     }
     if (graduationYear !== undefined) {
-      dataToUpdate.graduationYear = graduationYear ? Number(graduationYear) : null;
+      if (graduationYear !== null && graduationYear !== "") {
+        const numYear = Number(graduationYear);
+        if (isNaN(numYear) || numYear < 2000 || numYear > 2040) {
+          throw new AppError("Graduation year must be between 2000 and 2040", 400);
+        }
+        dataToUpdate.graduationYear = numYear;
+      } else {
+        dataToUpdate.graduationYear = null;
+      }
     }
     if (githubUrl !== undefined) dataToUpdate.githubUrl = githubUrl || null;
     if (linkedinUrl !== undefined) dataToUpdate.linkedinUrl = linkedinUrl || null;
@@ -154,15 +183,18 @@ export async function addSkill(req: AuthedRequest, res: Response, next: NextFunc
     if (!name || typeof name !== "string" || !name.trim()) {
       throw new AppError("Skill name is required", 400);
     }
-    const skill = await prisma.skill.upsert({
-      where: { name: name.trim() },
-      update: {},
-      create: { name: name.trim() },
+    const cleanName = name.trim();
+    let skill = await prisma.skill.findFirst({
+      where: { name: { equals: cleanName, mode: "insensitive" } },
     });
+    if (!skill) {
+      skill = await prisma.skill.create({ data: { name: cleanName } });
+    }
     const studentSkill = await prisma.studentSkill.upsert({
       where: { studentId_skillId: { studentId: student.id, skillId: skill.id } },
       update: { proficiency: proficiency || "BEGINNER" },
       create: { studentId: student.id, skillId: skill.id, proficiency: proficiency || "BEGINNER" },
+      include: { skill: true },
     });
     res.status(201).json({ success: true, data: studentSkill });
   } catch (err) {

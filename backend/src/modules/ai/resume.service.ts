@@ -80,11 +80,14 @@ Ensure output is pure JSON.`;
   // Auto-populate/refresh StudentSkill rows from extracted skills (self-declared tier)
   for (const skillName of result.extractedSkills) {
     try {
-      const skill = await prisma.skill.upsert({
-        where: { name: skillName },
-        update: {},
-        create: { name: skillName },
+      const cleanSkill = (skillName || "").trim();
+      if (!cleanSkill) continue;
+      let skill = await prisma.skill.findFirst({
+        where: { name: { equals: cleanSkill, mode: "insensitive" } },
       });
+      if (!skill) {
+        skill = await prisma.skill.create({ data: { name: cleanSkill } });
+      }
       await prisma.studentSkill.upsert({
         where: { studentId_skillId: { studentId, skillId: skill.id } },
         update: {},

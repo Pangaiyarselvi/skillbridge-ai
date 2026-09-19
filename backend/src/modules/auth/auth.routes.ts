@@ -10,5 +10,6 @@ router.post("/logout", ctrl.logoutHandler);
 router.post("/forgot-password", ctrl.forgotPasswordHandler);
 router.post("/reset-password", ctrl.resetPasswordHandler);
 router.post("/verify-email", ctrl.verifyEmailHandler);
+router.get("/colleges", ctrl.listPublicColleges);
 
 export default router;

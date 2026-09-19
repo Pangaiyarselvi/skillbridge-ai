@@ -109,3 +109,26 @@ export async function verifyEmailHandler(req: Request, res: Response, next: Next
   }
 }
 
+export async function listPublicColleges(_req: Request, res: Response, next: NextFunction) {
+  try {
+    const { prisma } = await import("../../config/prisma.js");
+    const colleges = await prisma.college.findMany({
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, code: true, verificationStatus: true },
+    });
+
+    const seen = new Set<string>();
+    const deduplicated = colleges.filter((c) => {
+      const norm = c.name.trim().toLowerCase();
+      if (seen.has(norm)) return false;
+      seen.add(norm);
+      return true;
+    });
+
+    res.json({ success: true, data: deduplicated });
+  } catch (err) {
+    next(err);
+  }
+}
+
+

@@ -45,9 +45,14 @@ export async function createOpportunity(req: AuthedRequest, res: Response, next:
 
     if (Array.isArray(skillNames) && skillNames.length > 0) {
       const resolved = await Promise.all(
-        skillNames.map((name: string) =>
-          prisma.skill.upsert({ where: { name }, update: {}, create: { name } })
-        )
+        skillNames.map(async (name: string) => {
+          const cleanName = name.trim();
+          const existing = await prisma.skill.findFirst({
+            where: { name: { equals: cleanName, mode: "insensitive" } },
+          });
+          if (existing) return existing;
+          return prisma.skill.create({ data: { name: cleanName } });
+        })
       );
       skillCreates = [...skillCreates, ...resolved.map((s) => ({ skillId: s.id, weight: 1 }))];
     }
