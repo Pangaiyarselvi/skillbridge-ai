@@ -106,7 +106,7 @@ export async function updateApplicationStatus(req: AuthedRequest, res: Response,
       },
     });
 
-    // If status changed to OFFERED, save offer letter and dispatch real email
+    // If status changed to OFFERED: trigger event-driven offer generation, student notification, and automated email delivery
     if (status === "OFFERED") {
       const fullApp = await prisma.application.findUnique({
         where: { id: application.id },
@@ -120,7 +120,7 @@ export async function updateApplicationStatus(req: AuthedRequest, res: Response,
         const salary = req.body.salaryPackage || fullApp.opportunity.stipendOrSalary || "Competitive Package";
         const loc = req.body.location || fullApp.opportunity.location || (fullApp.opportunity.isRemote ? "Remote" : "Hybrid");
 
-        // 1. Save or retrieve offer letter in database
+        // 1. Automatically generate or retrieve the offer letter in database
         let offer = await prisma.offerLetter.findFirst({
           where: { studentId: fullApp.studentId, opportunityId: fullApp.opportunityId },
         });
@@ -139,9 +139,46 @@ export async function updateApplicationStatus(req: AuthedRequest, res: Response,
               letterContent: `OFFICIAL OFFER OF EMPLOYMENT\n\nDear ${fullApp.student.fullName},\n\nWe are pleased to inform you that you have received an offer from ${fullApp.opportunity.company.name} for the position of ${fullApp.opportunity.title}.\n\nPackage: ${salary}\nLocation: ${loc}\n\nPlease log in to SkillBridge AI to view and download your offer letter.\n\nBest Regards,\nSkillBridge AI Team`,
             },
           });
+          console.log(`[Event:OFFERED] Created new offer letter record: ${offer.id}`);
+        } else {
+          console.log(`[Event:OFFERED] Retrieved existing offer letter record: ${offer.id}`);
         }
 
-        // 2. Send email to student's registered email address
+        // 2. Automatically generate Communication record in Student Portal Inbox
+        const existingComm = await prisma.communication.findFirst({
+          where: { offerLetterId: offer.id },
+        });
+        if (!existingComm) {
+          await prisma.communication.create({
+            data: {
+              senderId: fullApp.opportunity.company.userId,
+              recipientId: fullApp.student.userId,
+              category: "OFFER_LETTER",
+              priority: "URGENT",
+              subject: `Congratulations! Official Job Offer: ${fullApp.opportunity.title} at ${fullApp.opportunity.company.name}`,
+              body: `Dear ${fullApp.student.fullName},\n\nWe are pleased to inform you that you have received an offer from ${fullApp.opportunity.company.name} for the position of ${fullApp.opportunity.title} with a package of ${salary}.\n\nPlease review your complete offer letter in your Offer Center to accept or decline.\n\nBest Regards,\nSkillBridge AI Team`,
+              offerLetterId: offer.id,
+              metadata: {
+                jobRole: fullApp.opportunity.title,
+                salaryPackage: salary,
+                offerId: offer.id,
+              },
+            },
+          });
+        }
+
+        // 3. Automatically Notify Student with direct link to Student Portal Offer Center
+        await prisma.notification.create({
+          data: {
+            userId: fullApp.student.userId,
+            type: "APPLICATION_UPDATE",
+            title: `🏆 New Job Offer Received: ${fullApp.opportunity.company.name}`,
+            body: `You have received an offer for ${fullApp.opportunity.title} (${salary}). Click to view and download!`,
+            link: "/student/offers",
+          },
+        });
+
+        // 4. Automatically send email to student's registered email address with PDF attachment if available
         sendOfferLetterEmail({
           to: fullApp.student.user.email,
           studentName: fullApp.student.fullName,
@@ -152,9 +189,17 @@ export async function updateApplicationStatus(req: AuthedRequest, res: Response,
           location: loc,
           documentUrl: req.body.documentUrl || offer.documentUrl,
           offerId: offer.id,
-        }).catch((err) => {
-          console.error(`[Mailer] Error sending offer email to ${fullApp.student.user.email}:`, err);
-        });
+        })
+          .then((res) => {
+            if (res.success) {
+              console.log(`[Event:OFFERED] ✅ Offer letter email successfully delivered to ${fullApp.student.user.email} (MessageId: ${res.messageId})`);
+            } else {
+              console.warn(`[Event:OFFERED] ⚠️ Offer letter email failed for ${fullApp.student.user.email}: ${res.reason || res.error}`);
+            }
+          })
+          .catch((err) => {
+            console.error(`[Event:OFFERED] ❌ Error dispatching offer email to ${fullApp.student.user.email}:`, err?.message || err);
+          });
       }
     }
 
