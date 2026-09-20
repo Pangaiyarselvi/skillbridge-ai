@@ -99,6 +99,12 @@ export async function updateApplicationStatus(req: AuthedRequest, res: Response,
     const { status, note } = req.body;
     const normalizedStatus = (typeof status === "string" ? status.trim().toUpperCase() : status) as any;
 
+    const currentApp = await prisma.application.findUnique({
+      where: { id: req.params.id },
+      select: { status: true },
+    });
+    const wasAlreadyOffered = currentApp?.status === "OFFERED";
+
     const application = await prisma.application.update({
       where: { id: req.params.id },
       data: { status: normalizedStatus, statusHistory: { create: { status: normalizedStatus, note } } },
@@ -117,6 +123,11 @@ export async function updateApplicationStatus(req: AuthedRequest, res: Response,
 
     // If status changed to OFFERED: trigger event-driven offer generation, student notification, and automated email delivery
     if (normalizedStatus === "OFFERED") {
+      if (wasAlreadyOffered) {
+        console.log(`[Offer] Application ${application.id} was already in OFFERED status. Skipping duplicate email dispatch.`);
+        return res.json({ success: true, data: application });
+      }
+
       const fullApp = await prisma.application.findUnique({
         where: { id: application.id },
         include: {
@@ -188,9 +199,8 @@ export async function updateApplicationStatus(req: AuthedRequest, res: Response,
         });
 
         // 4. Automatically send email to student's registered email address with PDF attachment if available
-        console.log(`[Mailer] Attempting email send to: ${fullApp.student.user.email}`);
         try {
-          const emailRes = await sendOfferLetterEmail({
+          await sendOfferLetterEmail({
             to: fullApp.student.user.email,
             studentName: fullApp.student.fullName,
             companyName: fullApp.opportunity.company.name,
@@ -201,14 +211,8 @@ export async function updateApplicationStatus(req: AuthedRequest, res: Response,
             documentUrl: req.body.documentUrl || offer.documentUrl,
             offerId: offer.id,
           });
-
-          if (emailRes.success) {
-            console.log(`[Mailer] Email sent successfully to ${fullApp.student.user.email} (MessageId: ${emailRes.messageId})`);
-          } else {
-            console.error(`[Mailer] Email failed for ${fullApp.student.user.email}. Reason: ${emailRes.error || "Delivery unacknowledged"}`);
-          }
         } catch (emailErr: any) {
-          console.error(`[Mailer] Email failed for ${fullApp.student.user.email}. Reason: ${emailErr?.message || emailErr}`);
+          console.error(`[Mailer] Email send failure to ${fullApp.student.user.email}. Reason: ${emailErr?.message || emailErr}`);
         }
       } else {
         console.warn(`[Event:OFFERED] Application ${application.id} student or email not found. Skipping email.`);

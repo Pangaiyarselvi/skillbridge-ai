@@ -71,8 +71,6 @@ async function main() {
 
   // 5. Test Email Sending to registered student email
   console.log("\n[4] Nodemailer Execution Test:");
-  console.log(`[Mailer] Attempting email send to: ${app.student.user.email}`);
-
   const emailResult = await sendOfferLetterEmail({
     to: app.student.user.email,
     studentName: app.student.fullName,
@@ -84,13 +82,25 @@ async function main() {
   });
 
   if (emailResult.success) {
-    console.log(`[Mailer] Email sent successfully to ${app.student.user.email} (MessageId: ${emailResult.messageId})`);
     if (emailResult.previewUrl) {
       console.log(`[Mailer] 🔗 Test Preview URL: ${emailResult.previewUrl}`);
     }
-  } else {
-    console.error(`[Mailer] Email failed for ${app.student.user.email}. Reason: ${emailResult.error}`);
   }
+
+  // 6. Test Duplicate Send Prevention
+  console.log("\n[5] Testing Duplicate Send Prevention:");
+  console.log("Triggering immediate secondary email for the same offer...");
+  const duplicateResult = await sendOfferLetterEmail({
+    to: app.student.user.email,
+    studentName: app.student.fullName,
+    companyName: app.opportunity.company.name,
+    jobRole: app.opportunity.title,
+    salaryPackage: offer.salaryPackage || "₹12,00,000 / annum",
+    location: offer.location || "Hybrid",
+    offerId: offer.id,
+  });
+
+  console.log(`- Duplicate result: ${duplicateResult.messageId === "DUPLICATE_SKIPPED" ? "✅ Successfully caught and skipped duplicate send" : "❌ Not skipped"}`);
 
   console.log("\n==================================================");
   console.log("               AUDIT COMPLETED                    ");

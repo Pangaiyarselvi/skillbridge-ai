@@ -2,29 +2,44 @@ import nodemailer from "nodemailer";
 import fs from "fs";
 import path from "path";
 
+let activeTransporter: nodemailer.Transporter | null = null;
+let isTransporterVerified = false;
 let etherealTransporter: nodemailer.Transporter | null = null;
 
-export async function getTransporter() {
-  const host = process.env.SMTP_HOST?.trim();
-  const user = process.env.SMTP_USER?.trim();
-  const pass = process.env.SMTP_PASS?.trim();
-  const port = Number(process.env.SMTP_PORT || 587);
+// In-memory deduplication cache to prevent duplicate email sends within 60 seconds
+const recentOfferEmails = new Map<string, number>();
 
-  if (host && user && pass) {
-    const isGmail = host.toLowerCase().includes("gmail");
-    return nodemailer.createTransport({
-      ...(isGmail ? { service: "gmail" } : { host, port }),
-      secure: port === 465,
-      auth: { user, pass },
-      tls: {
-        rejectUnauthorized: false,
-      },
-      connectionTimeout: 10000,
-      greetingTimeout: 5000,
-    });
+export async function getTransporter(): Promise<nodemailer.Transporter | null> {
+  const user = process.env.SMTP_USER?.trim();
+  const pass = process.env.SMTP_PASS?.trim()?.replace(/\s+/g, ""); // Remove any spaces from Google App Password
+
+  // 1. Primary Gmail SMTP Transporter
+  if (user && pass) {
+    if (!activeTransporter) {
+      activeTransporter = nodemailer.createTransport({
+        service: "gmail",
+        auth: {
+          user,
+          pass,
+        },
+        tls: {
+          rejectUnauthorized: false,
+        },
+      });
+
+      try {
+        await activeTransporter.verify();
+        isTransporterVerified = true;
+        console.log(`[Mailer] SMTP connection success: Verified connection to Gmail SMTP for ${user}`);
+      } catch (verifyErr: any) {
+        isTransporterVerified = false;
+        console.error(`[Mailer] SMTP connection failure: ${verifyErr?.message || verifyErr}`);
+      }
+    }
+    return activeTransporter;
   }
 
-  // Automatic fallback: initialize Ethereal SMTP transporter so that Nodemailer delivery always functions
+  // 2. Automated fallback to Ethereal if no Gmail credentials are provided
   if (!etherealTransporter) {
     try {
       const testAccount = await nodemailer.createTestAccount();
@@ -37,9 +52,9 @@ export async function getTransporter() {
           pass: testAccount.pass,
         },
       });
-      console.log(`[Mailer] ℹ️ Initialized automated SMTP test delivery service (${testAccount.user})`);
-    } catch (err) {
-      console.warn("[Mailer] Could not initialize fallback SMTP transport:", err);
+      console.log(`[Mailer] SMTP connection success: Initialized automated Ethereal fallback test transport (${testAccount.user})`);
+    } catch (err: any) {
+      console.error(`[Mailer] SMTP connection failure: Could not initialize fallback transport: ${err?.message || err}`);
       return null;
     }
   }
@@ -49,24 +64,18 @@ export async function getTransporter() {
 
 export function checkSmtpConfig(): {
   configured: boolean;
-  host: string | null;
-  port: number;
   user: string | null;
   passSet: boolean;
   from: string;
 } {
-  const host = process.env.SMTP_HOST?.trim() || null;
   const user = process.env.SMTP_USER?.trim() || null;
   const pass = process.env.SMTP_PASS?.trim() || null;
-  const port = Number(process.env.SMTP_PORT || 587);
   const from =
     process.env.SMTP_FROM ||
     (user ? `"SkillBridge AI" <${user}>` : `"SkillBridge AI" <no-reply@skillbridge.ai>`);
 
   return {
-    configured: Boolean(host && user && pass),
-    host,
-    port,
+    configured: Boolean(user && pass),
     user,
     passSet: Boolean(pass),
     from,
@@ -85,20 +94,20 @@ export async function sendEmail(opts: {
   const smtpStatus = checkSmtpConfig();
   console.log(`[Mailer] Attempting email send to: ${opts.to}`);
   if (!smtpStatus.configured) {
-    console.warn(`[Mailer] ⚠️ Real SMTP credentials not fully configured in environment (HOST: ${smtpStatus.host || "NOT SET"}, USER: ${smtpStatus.user || "NOT SET"}, PASS: ${smtpStatus.passSet ? "SET" : "NOT SET"}). Using test transport fallback.`);
+    console.warn(`[Mailer] ⚠️ Gmail SMTP credentials not configured (SMTP_USER: ${smtpStatus.user || "NOT SET"}, SMTP_PASS: ${smtpStatus.passSet ? "SET" : "NOT SET"}). Falling back to Ethereal test inbox.`);
   }
 
   const transporter = await getTransporter();
   if (!transporter) {
     const errorMsg = "SMTP transporter could not be initialized";
-    console.error(`[Mailer] Email failed for ${opts.to}: ${errorMsg}`);
+    console.error(`[Mailer] Email send failure to ${opts.to}. Reason: ${errorMsg}`);
     return { success: false, error: errorMsg };
   }
 
   try {
     const from =
       process.env.SMTP_FROM ||
-      (process.env.SMTP_USER ? `"SkillBridge AI" <${process.env.SMTP_USER}>` : `"SkillBridge AI" <no-reply@skillbridge.ai>`);
+      (smtpStatus.user ? `"SkillBridge AI" <${smtpStatus.user}>` : `"SkillBridge AI" <no-reply@skillbridge.ai>`);
 
     const info = await transporter.sendMail({
       from,
@@ -111,14 +120,14 @@ export async function sendEmail(opts: {
 
     const previewUrl = nodemailer.getTestMessageUrl(info);
     if (previewUrl) {
-      console.log(`[Mailer] Email sent successfully to ${opts.to} via Ethereal test inbox (MessageId: ${info.messageId}, Preview: ${previewUrl})`);
+      console.log(`[Mailer] Email send success to ${opts.to} via Ethereal test inbox (MessageId: ${info.messageId}, Preview: ${previewUrl})`);
     } else {
-      console.log(`[Mailer] Email sent successfully to ${opts.to} (MessageId: ${info.messageId})`);
+      console.log(`[Mailer] Email send success to ${opts.to} (MessageId: ${info.messageId})`);
     }
 
     return { success: true, messageId: info.messageId, previewUrl: previewUrl || undefined };
   } catch (err: any) {
-    console.error(`[Mailer] Email failed for ${opts.to}. Reason: ${err?.message || err}`);
+    console.error(`[Mailer] Email send failure to ${opts.to}. Reason: ${err?.message || err}`);
     return { success: false, error: err?.message || String(err) };
   }
 }
@@ -140,6 +149,24 @@ export interface OfferEmailParams {
 
 export async function sendOfferLetterEmail(params: OfferEmailParams) {
   try {
+    const dedupKey = params.offerId ? `offer:${params.offerId}` : `student:${params.to}:${params.jobRole}`;
+    const now = Date.now();
+    const lastSent = recentOfferEmails.get(dedupKey);
+
+    if (lastSent && now - lastSent < 60000) {
+      console.log(`[Mailer] Duplicate send prevented: Offer letter email to ${params.to} for "${params.jobRole}" was already dispatched ${Math.round((now - lastSent) / 1000)}s ago.`);
+      return { success: true, messageId: "DUPLICATE_SKIPPED" };
+    }
+
+    recentOfferEmails.set(dedupKey, now);
+
+    // Clean up old entries
+    if (recentOfferEmails.size > 200) {
+      for (const [k, time] of recentOfferEmails.entries()) {
+        if (now - time > 120000) recentOfferEmails.delete(k);
+      }
+    }
+
     const appUrl = (process.env.APP_URL || "https://skillbridge-ai.vercel.app").replace(/\/+$/, "");
     const offerUrl = `${appUrl}/student/offers`;
 
