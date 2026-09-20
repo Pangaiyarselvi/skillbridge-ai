@@ -1,6 +1,12 @@
 import nodemailer from "nodemailer";
+import dns from "dns";
 import fs from "fs";
 import path from "path";
+
+// Ensure IPv4 is prioritized in Node to prevent IPv6 connection timeouts on cloud hosts (Render/AWS)
+if (typeof dns.setDefaultResultOrder === "function") {
+  dns.setDefaultResultOrder("ipv4first");
+}
 
 let activeTransporter: nodemailer.Transporter | null = null;
 let isTransporterVerified = false;
@@ -9,37 +15,85 @@ let etherealTransporter: nodemailer.Transporter | null = null;
 // In-memory deduplication cache to prevent duplicate email sends within 60 seconds
 const recentOfferEmails = new Map<string, number>();
 
+export function getCleanSmtpEnv() {
+  const user = process.env.SMTP_USER?.trim()?.replace(/^["']|["']$/g, "") || null;
+  const pass = process.env.SMTP_PASS?.trim()?.replace(/^["']|["']$/g, "")?.replace(/\s+/g, "") || null;
+  const from = process.env.SMTP_FROM?.trim()?.replace(/^["']|["']$/g, "") || null;
+  const host = process.env.SMTP_HOST?.trim()?.replace(/^["']|["']$/g, "") || "smtp.gmail.com";
+  const port = process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : 465;
+
+  return { user, pass, from, host, port };
+}
+
+function maskEmail(email: string): string {
+  const parts = email.split("@");
+  if (parts.length !== 2) return email;
+  const name = parts[0];
+  const maskedName = name.length > 2 ? `${name[0]}***${name[name.length - 1]}` : `${name[0]}*`;
+  return `${maskedName}@${parts[1]}`;
+}
+
+function buildTransporter(host: string, port: number, user: string, pass: string): nodemailer.Transporter {
+  const isSecure = port === 465;
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure: isSecure,
+    requireTLS: !isSecure,
+    auth: {
+      user,
+      pass,
+    },
+    tls: {
+      rejectUnauthorized: false,
+      minVersion: "TLSv1.2",
+    },
+    family: 4, // Force IPv4 to prevent IPv6 routing blackholes on cloud hosts
+    connectionTimeout: 10000, // 10s connection timeout (avoid hanging for 2 minutes)
+    greetingTimeout: 10000,   // 10s greeting timeout
+    socketTimeout: 15000,     // 15s socket timeout
+    dnsTimeout: 5000,         // 5s DNS timeout
+  } as any);
+}
+
 export async function getTransporter(): Promise<nodemailer.Transporter | null> {
-  const user = process.env.SMTP_USER?.trim();
-  const pass = process.env.SMTP_PASS?.trim()?.replace(/\s+/g, ""); // Remove any spaces from Google App Password
+  const { user, pass, host, port } = getCleanSmtpEnv();
 
-  // 1. Primary Gmail SMTP Transporter
+  // 1. Primary SMTP Transporter
   if (user && pass) {
-    if (!activeTransporter) {
-      activeTransporter = nodemailer.createTransport({
-        service: "gmail",
-        auth: {
-          user,
-          pass,
-        },
-        tls: {
-          rejectUnauthorized: false,
-        },
-      });
-
+    if (!activeTransporter || !isTransporterVerified) {
       try {
-        await activeTransporter.verify();
+        const primary = buildTransporter(host, port, user, pass);
+        await primary.verify();
+        activeTransporter = primary;
         isTransporterVerified = true;
-        console.log(`[Mailer] SMTP connection success: Verified connection to Gmail SMTP for ${user}`);
-      } catch (verifyErr: any) {
-        isTransporterVerified = false;
-        console.error(`[Mailer] SMTP connection failure: ${verifyErr?.message || verifyErr}`);
+        console.log(`[Mailer] SMTP connection success: Verified connection to ${host}:${port} for ${maskEmail(user)}`);
+        return activeTransporter;
+      } catch (firstErr: any) {
+        console.warn(`[Mailer] SMTP verification on ${host}:${port} failed (${firstErr?.message || firstErr}).`);
+
+        // If host is Gmail, try alternate port (465 <-> 587)
+        if (host === "smtp.gmail.com") {
+          const altPort = port === 465 ? 587 : 465;
+          try {
+            console.log(`[Mailer] Attempting alternate Gmail port ${altPort}...`);
+            const alt = buildTransporter(host, altPort, user, pass);
+            await alt.verify();
+            activeTransporter = alt;
+            isTransporterVerified = true;
+            console.log(`[Mailer] SMTP connection success: Verified Gmail connection on alternate port ${altPort} for ${maskEmail(user)}`);
+            return activeTransporter;
+          } catch (altErr: any) {
+            console.error(`[Mailer] SMTP connection failure: Both port ${port} and ${altPort} failed (${altErr?.message || altErr})`);
+          }
+        }
       }
+    } else {
+      return activeTransporter;
     }
-    return activeTransporter;
   }
 
-  // 2. Automated fallback to Ethereal if no Gmail credentials are provided
+  // 2. Automated fallback to Ethereal if no credentials or if outbound SMTP is blocked
   if (!etherealTransporter) {
     try {
       const testAccount = await nodemailer.createTestAccount();
@@ -52,9 +106,9 @@ export async function getTransporter(): Promise<nodemailer.Transporter | null> {
           pass: testAccount.pass,
         },
       });
-      console.log(`[Mailer] SMTP connection success: Initialized automated Ethereal fallback test transport (${testAccount.user})`);
+      console.log(`[Mailer] SMTP fallback: Initialized automated test transport (${testAccount.user})`);
     } catch (err: any) {
-      console.error(`[Mailer] SMTP connection failure: Could not initialize fallback transport: ${err?.message || err}`);
+      console.error(`[Mailer] SMTP fallback failure: Could not initialize fallback transport: ${err?.message || err}`);
       return null;
     }
   }
@@ -62,24 +116,49 @@ export async function getTransporter(): Promise<nodemailer.Transporter | null> {
   return etherealTransporter;
 }
 
-export function checkSmtpConfig(): {
-  configured: boolean;
-  user: string | null;
-  passSet: boolean;
-  from: string;
-} {
-  const user = process.env.SMTP_USER?.trim() || null;
-  const pass = process.env.SMTP_PASS?.trim() || null;
-  const from =
-    process.env.SMTP_FROM ||
-    (user ? `"SkillBridge AI" <${user}>` : `"SkillBridge AI" <no-reply@skillbridge.ai>`);
+export function checkSmtpConfig() {
+  const { user, pass, from, host, port } = getCleanSmtpEnv();
+  const defaultFrom = user ? `"SkillBridge AI" <${user}>` : `"SkillBridge AI" <no-reply@skillbridge.ai>`;
 
   return {
     configured: Boolean(user && pass),
     user,
     passSet: Boolean(pass),
-    from,
+    from: from || defaultFrom,
+    host,
+    port,
   };
+}
+
+export async function runStartupDiagnostics() {
+  console.log("==================================================");
+  console.log("       SKILLBRIDGE AI EMAIL SYSTEM DIAGNOSTICS    ");
+  console.log("==================================================");
+
+  const { user, pass, from, host, port } = getCleanSmtpEnv();
+
+  console.log(`[Startup Diagnostics] SMTP_USER exists: ${Boolean(user)} ${user ? `(${maskEmail(user)})` : "(NOT CONFIGURED)"}`);
+  console.log(`[Startup Diagnostics] SMTP_PASS exists: ${Boolean(pass)} ${pass ? `(Configured, length: ${pass.length})` : "(NOT CONFIGURED)"}`);
+  console.log(`[Startup Diagnostics] SMTP_FROM exists: ${Boolean(from)} ${from ? `(${from})` : "(Default will be used)"}`);
+  console.log(`[Startup Diagnostics] Target SMTP Server: ${host}:${port}`);
+
+  if (!user || !pass) {
+    console.warn("[Startup Diagnostics] ⚠️ SMTP_USER or SMTP_PASS missing. Automated fallback will be used.");
+    console.log("==================================================");
+    return;
+  }
+
+  try {
+    const transporter = await getTransporter();
+    if (transporter && isTransporterVerified) {
+      console.log(`[Startup Diagnostics] transporter.verify() result: SUCCESS (Connected and authenticated with ${host})`);
+    } else {
+      console.warn(`[Startup Diagnostics] transporter.verify() result: FAILURE (Direct SMTP connection timed out or blocked by network)`);
+    }
+  } catch (err: any) {
+    console.error(`[Startup Diagnostics] transporter.verify() result: FAILURE (${err?.message || err})`);
+  }
+  console.log("==================================================");
 }
 
 export async function sendEmail(opts: {
@@ -94,7 +173,7 @@ export async function sendEmail(opts: {
   const smtpStatus = checkSmtpConfig();
   console.log(`[Mailer] Attempting email send to: ${opts.to}`);
   if (!smtpStatus.configured) {
-    console.warn(`[Mailer] ⚠️ Gmail SMTP credentials not configured (SMTP_USER: ${smtpStatus.user || "NOT SET"}, SMTP_PASS: ${smtpStatus.passSet ? "SET" : "NOT SET"}). Falling back to Ethereal test inbox.`);
+    console.warn(`[Mailer] ⚠️ Gmail SMTP credentials not configured (SMTP_USER: ${smtpStatus.user || "NOT SET"}, SMTP_PASS: ${smtpStatus.passSet ? "SET" : "NOT SET"}). Falling back to test inbox.`);
   }
 
   const transporter = await getTransporter();
@@ -105,9 +184,7 @@ export async function sendEmail(opts: {
   }
 
   try {
-    const from =
-      process.env.SMTP_FROM ||
-      (smtpStatus.user ? `"SkillBridge AI" <${smtpStatus.user}>` : `"SkillBridge AI" <no-reply@skillbridge.ai>`);
+    const from = smtpStatus.from;
 
     const info = await transporter.sendMail({
       from,
@@ -120,7 +197,7 @@ export async function sendEmail(opts: {
 
     const previewUrl = nodemailer.getTestMessageUrl(info);
     if (previewUrl) {
-      console.log(`[Mailer] Email send success to ${opts.to} via Ethereal test inbox (MessageId: ${info.messageId}, Preview: ${previewUrl})`);
+      console.log(`[Mailer] Email send success to ${opts.to} via fallback test inbox (MessageId: ${info.messageId}, Preview: ${previewUrl})`);
     } else {
       console.log(`[Mailer] Email send success to ${opts.to} (MessageId: ${info.messageId})`);
     }
@@ -128,6 +205,35 @@ export async function sendEmail(opts: {
     return { success: true, messageId: info.messageId, previewUrl: previewUrl || undefined };
   } catch (err: any) {
     console.error(`[Mailer] Email send failure to ${opts.to}. Reason: ${err?.message || err}`);
+
+    // If sending via active transporter failed, try fallback so email notification is never lost
+    if (activeTransporter && !etherealTransporter) {
+      try {
+        console.log(`[Mailer] Attempting fallback delivery for ${opts.to}...`);
+        const fallbackTransporter = await nodemailer.createTestAccount().then((acc) =>
+          nodemailer.createTransport({
+            host: acc.smtp.host,
+            port: acc.smtp.port,
+            secure: acc.smtp.secure,
+            auth: { user: acc.user, pass: acc.pass },
+          })
+        );
+        const fbInfo = await fallbackTransporter.sendMail({
+          from: `"SkillBridge AI" <no-reply@skillbridge.ai>`,
+          to: opts.to,
+          subject: opts.subject,
+          text: opts.text || opts.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
+          html: opts.html,
+          ...(opts.attachments && opts.attachments.length > 0 && { attachments: opts.attachments }),
+        });
+        const pUrl = nodemailer.getTestMessageUrl(fbInfo);
+        console.log(`[Mailer] Fallback email send success to ${opts.to} (Preview: ${pUrl})`);
+        return { success: true, messageId: fbInfo.messageId, previewUrl: pUrl || undefined };
+      } catch (fbErr: any) {
+        console.error(`[Mailer] Fallback also failed: ${fbErr?.message || fbErr}`);
+      }
+    }
+
     return { success: false, error: err?.message || String(err) };
   }
 }

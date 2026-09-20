@@ -73,6 +73,18 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
+app.get("/api/debug/email", (_req, res) => {
+  const user = process.env.SMTP_USER?.trim()?.replace(/^["']|["']$/g, "");
+  const pass = process.env.SMTP_PASS?.trim()?.replace(/^["']|["']$/g, "");
+  const from = process.env.SMTP_FROM?.trim()?.replace(/^["']|["']$/g, "");
+
+  res.json({
+    smtpUserConfigured: Boolean(user),
+    smtpPassConfigured: Boolean(pass),
+    smtpFromConfigured: Boolean(from),
+  });
+});
+
 // Feature Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/students", studentRoutes);
