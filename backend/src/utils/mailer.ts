@@ -11,14 +11,16 @@ export async function getTransporter() {
   const port = Number(process.env.SMTP_PORT || 587);
 
   if (host && user && pass) {
+    const isGmail = host.toLowerCase().includes("gmail");
     return nodemailer.createTransport({
-      host,
-      port,
-      secure: port === 465, // true for port 465 (SSL), false for 587/25 (STARTTLS)
+      ...(isGmail ? { service: "gmail" } : { host, port }),
+      secure: port === 465,
       auth: { user, pass },
       tls: {
         rejectUnauthorized: false,
       },
+      connectionTimeout: 10000,
+      greetingTimeout: 5000,
     });
   }
 
@@ -45,6 +47,32 @@ export async function getTransporter() {
   return etherealTransporter;
 }
 
+export function checkSmtpConfig(): {
+  configured: boolean;
+  host: string | null;
+  port: number;
+  user: string | null;
+  passSet: boolean;
+  from: string;
+} {
+  const host = process.env.SMTP_HOST?.trim() || null;
+  const user = process.env.SMTP_USER?.trim() || null;
+  const pass = process.env.SMTP_PASS?.trim() || null;
+  const port = Number(process.env.SMTP_PORT || 587);
+  const from =
+    process.env.SMTP_FROM ||
+    (user ? `"SkillBridge AI" <${user}>` : `"SkillBridge AI" <no-reply@skillbridge.ai>`);
+
+  return {
+    configured: Boolean(host && user && pass),
+    host,
+    port,
+    user,
+    passSet: Boolean(pass),
+    from,
+  };
+}
+
 export async function sendEmail(opts: {
   to: string;
   subject: string;
@@ -54,10 +82,17 @@ export async function sendEmail(opts: {
 }) {
   if (process.env.NODE_ENV === "test") return { success: true, test: true };
 
+  const smtpStatus = checkSmtpConfig();
+  console.log(`[Mailer] Attempting email send to: ${opts.to}`);
+  if (!smtpStatus.configured) {
+    console.warn(`[Mailer] ⚠️ Real SMTP credentials not fully configured in environment (HOST: ${smtpStatus.host || "NOT SET"}, USER: ${smtpStatus.user || "NOT SET"}, PASS: ${smtpStatus.passSet ? "SET" : "NOT SET"}). Using test transport fallback.`);
+  }
+
   const transporter = await getTransporter();
   if (!transporter) {
-    console.warn(`[Mailer] ⚠️ SMTP transporter unavailable. Email to "${opts.to}" skipped.`);
-    return { success: false, reason: "SMTP_UNAVAILABLE" };
+    const errorMsg = "SMTP transporter could not be initialized";
+    console.error(`[Mailer] Email failed for ${opts.to}: ${errorMsg}`);
+    return { success: false, error: errorMsg };
   }
 
   try {
@@ -76,15 +111,15 @@ export async function sendEmail(opts: {
 
     const previewUrl = nodemailer.getTestMessageUrl(info);
     if (previewUrl) {
-      console.log(`[Mailer] ✅ Email successfully sent to ${opts.to} (MessageId: ${info.messageId}) - Preview URL: ${previewUrl}`);
+      console.log(`[Mailer] Email sent successfully to ${opts.to} via Ethereal test inbox (MessageId: ${info.messageId}, Preview: ${previewUrl})`);
     } else {
-      console.log(`[Mailer] ✅ Real email successfully sent to ${opts.to} (MessageId: ${info.messageId})`);
+      console.log(`[Mailer] Email sent successfully to ${opts.to} (MessageId: ${info.messageId})`);
     }
 
     return { success: true, messageId: info.messageId, previewUrl: previewUrl || undefined };
   } catch (err: any) {
-    console.error(`[Mailer] ❌ Error sending email to ${opts.to}:`, err?.message || err);
-    return { success: false, error: err?.message };
+    console.error(`[Mailer] Email failed for ${opts.to}. Reason: ${err?.message || err}`);
+    return { success: false, error: err?.message || String(err) };
   }
 }
 

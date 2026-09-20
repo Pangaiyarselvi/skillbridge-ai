@@ -97,22 +97,26 @@ export async function listApplicants(req: AuthedRequest, res: Response, next: Ne
 export async function updateApplicationStatus(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
     const { status, note } = req.body;
+    const normalizedStatus = (typeof status === "string" ? status.trim().toUpperCase() : status) as any;
+
     const application = await prisma.application.update({
       where: { id: req.params.id },
-      data: { status, statusHistory: { create: { status, note } } },
+      data: { status: normalizedStatus, statusHistory: { create: { status: normalizedStatus, note } } },
     });
+
+    console.log(`[Status Update] Offer status changed to ${normalizedStatus} for application: ${application.id}`);
 
     await prisma.notification.create({
       data: {
         userId: (await prisma.student.findUniqueOrThrow({ where: { id: application.studentId } })).userId,
         type: "APPLICATION_UPDATE",
         title: "Application status updated",
-        body: `Your application status changed to ${status}`,
+        body: `Your application status changed to ${normalizedStatus}`,
       },
     });
 
     // If status changed to OFFERED: trigger event-driven offer generation, student notification, and automated email delivery
-    if (status === "OFFERED") {
+    if (normalizedStatus === "OFFERED") {
       const fullApp = await prisma.application.findUnique({
         where: { id: application.id },
         include: {
@@ -144,9 +148,9 @@ export async function updateApplicationStatus(req: AuthedRequest, res: Response,
               letterContent: `OFFICIAL OFFER OF EMPLOYMENT\n\nDear ${fullApp.student.fullName},\n\nWe are pleased to inform you that you have received an offer from ${fullApp.opportunity.company.name} for the position of ${fullApp.opportunity.title}.\n\nPackage: ${salary}\nLocation: ${loc}\n\nPlease log in to SkillBridge AI to view and download your offer letter.\n\nBest Regards,\nSkillBridge AI Team`,
             },
           });
-          console.log(`[Event:OFFERED] Created new offer letter record: ${offer.id}`);
+          console.log(`[Offer] Offer letter created: ${offer.id} for student: ${fullApp.student.fullName} (${fullApp.student.user.email})`);
         } else {
-          console.log(`[Event:OFFERED] Retrieved existing offer letter record: ${offer.id}`);
+          console.log(`[Offer] Offer letter retrieved: ${offer.id} for student: ${fullApp.student.fullName} (${fullApp.student.user.email})`);
         }
 
         // 2. Automatically generate Communication record in Student Portal Inbox
@@ -184,27 +188,30 @@ export async function updateApplicationStatus(req: AuthedRequest, res: Response,
         });
 
         // 4. Automatically send email to student's registered email address with PDF attachment if available
-        sendOfferLetterEmail({
-          to: fullApp.student.user.email,
-          studentName: fullApp.student.fullName,
-          companyName: fullApp.opportunity.company.name,
-          companyLogo: fullApp.opportunity.company.logoUrl,
-          jobRole: fullApp.opportunity.title,
-          salaryPackage: salary,
-          location: loc,
-          documentUrl: req.body.documentUrl || offer.documentUrl,
-          offerId: offer.id,
-        })
-          .then((res) => {
-            if (res.success) {
-              console.log(`[Event:OFFERED] ✅ Offer letter email successfully delivered to ${fullApp.student.user.email} (MessageId: ${res.messageId})`);
-            } else {
-              console.warn(`[Event:OFFERED] ⚠️ Offer letter email failed for ${fullApp.student.user.email}: ${res.reason || res.error}`);
-            }
-          })
-          .catch((err) => {
-            console.error(`[Event:OFFERED] ❌ Error dispatching offer email to ${fullApp.student.user.email}:`, err?.message || err);
+        console.log(`[Mailer] Attempting email send to: ${fullApp.student.user.email}`);
+        try {
+          const emailRes = await sendOfferLetterEmail({
+            to: fullApp.student.user.email,
+            studentName: fullApp.student.fullName,
+            companyName: fullApp.opportunity.company.name,
+            companyLogo: fullApp.opportunity.company.logoUrl,
+            jobRole: fullApp.opportunity.title,
+            salaryPackage: salary,
+            location: loc,
+            documentUrl: req.body.documentUrl || offer.documentUrl,
+            offerId: offer.id,
           });
+
+          if (emailRes.success) {
+            console.log(`[Mailer] Email sent successfully to ${fullApp.student.user.email} (MessageId: ${emailRes.messageId})`);
+          } else {
+            console.error(`[Mailer] Email failed for ${fullApp.student.user.email}. Reason: ${emailRes.error || "Delivery unacknowledged"}`);
+          }
+        } catch (emailErr: any) {
+          console.error(`[Mailer] Email failed for ${fullApp.student.user.email}. Reason: ${emailErr?.message || emailErr}`);
+        }
+      } else {
+        console.warn(`[Event:OFFERED] Application ${application.id} student or email not found. Skipping email.`);
       }
     }
 
