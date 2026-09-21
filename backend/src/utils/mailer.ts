@@ -2,6 +2,7 @@ import nodemailer from "nodemailer";
 import dns from "dns";
 import fs from "fs";
 import path from "path";
+import { Resend } from "resend";
 
 // Ensure IPv4 is prioritized in Node to prevent IPv6 connection timeouts on cloud hosts (Render/AWS)
 if (typeof dns.setDefaultResultOrder === "function") {
@@ -11,9 +12,31 @@ if (typeof dns.setDefaultResultOrder === "function") {
 let activeTransporter: nodemailer.Transporter | null = null;
 let isTransporterVerified = false;
 let etherealTransporter: nodemailer.Transporter | null = null;
+let resendClient: Resend | null = null;
 
 // In-memory deduplication cache to prevent duplicate email sends within 60 seconds
 const recentOfferEmails = new Map<string, number>();
+
+export function getResendClient(): Resend | null {
+  const apiKey = process.env.RESEND_API_KEY?.trim();
+  if (!apiKey) return null;
+  if (!resendClient) {
+    resendClient = new Resend(apiKey);
+  }
+  return resendClient;
+}
+
+export function getResendFrom(): string {
+  if (process.env.RESEND_FROM?.trim()) {
+    return process.env.RESEND_FROM.trim();
+  }
+  const smtpFrom = process.env.SMTP_FROM?.trim();
+  // Resend will reject public mailbox domains (like @gmail.com or @yahoo.com)
+  if (smtpFrom && !smtpFrom.includes("@gmail.com") && !smtpFrom.includes("@yahoo.com")) {
+    return smtpFrom;
+  }
+  return "SkillBridge AI <onboarding@resend.dev>";
+}
 
 export function getCleanSmtpEnv() {
   const user = process.env.SMTP_USER?.trim()?.replace(/^["']|["']$/g, "") || null;
@@ -135,28 +158,38 @@ export async function runStartupDiagnostics() {
   console.log("       SKILLBRIDGE AI EMAIL SYSTEM DIAGNOSTICS    ");
   console.log("==================================================");
 
-  const { user, pass, from, host, port } = getCleanSmtpEnv();
+  const resendKey = process.env.RESEND_API_KEY?.trim();
+  const resendFrom = getResendFrom();
+  const isResendConfigured = Boolean(resendKey);
 
-  console.log(`[Startup Diagnostics] SMTP_USER exists: ${Boolean(user)} ${user ? `(${maskEmail(user)})` : "(NOT CONFIGURED)"}`);
-  console.log(`[Startup Diagnostics] SMTP_PASS exists: ${Boolean(pass)} ${pass ? `(Configured, length: ${pass.length})` : "(NOT CONFIGURED)"}`);
-  console.log(`[Startup Diagnostics] SMTP_FROM exists: ${Boolean(from)} ${from ? `(${from})` : "(Default will be used)"}`);
-  console.log(`[Startup Diagnostics] Target SMTP Server: ${host}:${port}`);
+  console.log(`[Startup Diagnostics] RESEND_API_KEY exists: ${isResendConfigured} ${resendKey ? `(Key: ${resendKey.slice(0, 5)}***)` : "(NOT CONFIGURED)"}`);
 
-  if (!user || !pass) {
-    console.warn("[Startup Diagnostics] ⚠️ SMTP_USER or SMTP_PASS missing. Automated fallback will be used.");
-    console.log("==================================================");
-    return;
+  if (isResendConfigured) {
+    console.log(`[Startup Diagnostics] Primary Provider: RESEND (HTTP API via port 443 - Immune to Render SMTP blocks)`);
+    console.log(`[Startup Diagnostics] Resend Sender Address: ${resendFrom}`);
+  } else {
+    console.log(`[Startup Diagnostics] Primary Provider: Nodemailer SMTP (Note: Render Free Tier blocks ports 25, 465, and 587)`);
   }
 
-  try {
-    const transporter = await getTransporter();
-    if (transporter && isTransporterVerified) {
-      console.log(`[Startup Diagnostics] transporter.verify() result: SUCCESS (Connected and authenticated with ${host})`);
-    } else {
-      console.warn(`[Startup Diagnostics] transporter.verify() result: FAILURE (Direct SMTP connection timed out or blocked by network)`);
+  const { user, pass, from, host, port } = getCleanSmtpEnv();
+  console.log(`[Startup Diagnostics] Fallback SMTP_USER exists: ${Boolean(user)} ${user ? `(${maskEmail(user)})` : "(NOT CONFIGURED)"}`);
+  console.log(`[Startup Diagnostics] Fallback SMTP_PASS exists: ${Boolean(pass)} ${pass ? `(Configured, length: ${pass.length})` : "(NOT CONFIGURED)"}`);
+  console.log(`[Startup Diagnostics] Fallback SMTP Server: ${host}:${port}`);
+
+  // Only run active SMTP verification check if Resend is NOT configured, or asynchronously without delaying startup
+  if (!isResendConfigured && user && pass) {
+    try {
+      const transporter = await getTransporter();
+      if (transporter && isTransporterVerified) {
+        console.log(`[Startup Diagnostics] SMTP transporter.verify() result: SUCCESS (${host})`);
+      } else {
+        console.warn(`[Startup Diagnostics] SMTP transporter.verify() result: FAILURE (Direct SMTP connection timed out or blocked by network)`);
+      }
+    } catch (err: any) {
+      console.error(`[Startup Diagnostics] SMTP transporter.verify() result: FAILURE (${err?.message || err})`);
     }
-  } catch (err: any) {
-    console.error(`[Startup Diagnostics] transporter.verify() result: FAILURE (${err?.message || err})`);
+  } else if (isResendConfigured) {
+    console.log("[Startup Diagnostics] Email system ready. Outgoing mail will be routed via Resend API.");
   }
   console.log("==================================================");
 }
@@ -167,18 +200,91 @@ export async function sendEmail(opts: {
   html: string;
   text?: string;
   attachments?: any[];
-}) {
-  if (process.env.NODE_ENV === "test") return { success: true, test: true };
+}): Promise<{ success: boolean; messageId?: string; previewUrl?: string; error?: string }> {
+  if (process.env.NODE_ENV === "test") return { success: true, messageId: "test-mock-id" };
 
+  console.log(`[Mailer] Attempting email send to: ${opts.to} | Subject: "${opts.subject}"`);
+
+  // =========================================================================
+  // 1. PRIMARY: Resend (HTTP REST API over port 443 — reliable on Render)
+  // =========================================================================
+  const resend = getResendClient();
+  if (resend) {
+    try {
+      const from = getResendFrom();
+
+      // Transform attachments to Resend format
+      const resendAttachments: Array<{
+        filename: string;
+        content?: Buffer | string;
+        path?: string;
+        contentType?: string;
+      }> = [];
+
+      if (opts.attachments && Array.isArray(opts.attachments)) {
+        for (const att of opts.attachments) {
+          if (!att) continue;
+          const filename = att.filename || att.name || "attachment.pdf";
+          if (att.content) {
+            resendAttachments.push({
+              filename,
+              content: att.content,
+              contentType: att.contentType,
+            });
+          } else if (att.path) {
+            if (typeof att.path === "string" && (att.path.startsWith("http://") || att.path.startsWith("https://"))) {
+              resendAttachments.push({
+                filename,
+                path: att.path,
+                contentType: att.contentType,
+              });
+            } else if (typeof att.path === "string") {
+              const resolved = path.isAbsolute(att.path) ? att.path : path.resolve(process.cwd(), att.path);
+              if (fs.existsSync(resolved)) {
+                resendAttachments.push({
+                  filename,
+                  content: fs.readFileSync(resolved),
+                  contentType: att.contentType || "application/pdf",
+                });
+              }
+            }
+          }
+        }
+      }
+
+      console.log(`[Mailer] Dispatching via Resend API to ${opts.to} (from: ${from})...`);
+      const { data, error } = await resend.emails.send({
+        from,
+        to: opts.to,
+        subject: opts.subject,
+        html: opts.html,
+        text: opts.text || opts.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
+        attachments: resendAttachments.length > 0 ? resendAttachments : undefined,
+      });
+
+      if (error) {
+        console.error(`[Mailer] Resend API error sending to ${opts.to}:`, error.message);
+        console.warn(`[Mailer] Attempting fallback to SMTP transporter...`);
+      } else if (data?.id) {
+        console.log(`[Mailer] Email send success to ${opts.to} via Resend (MessageId: ${data.id})`);
+        return { success: true, messageId: data.id };
+      }
+    } catch (resendErr: any) {
+      console.error(`[Mailer] Resend dispatch exception: ${resendErr?.message || resendErr}. Falling back to SMTP...`);
+    }
+  }
+
+  // =========================================================================
+  // 2. SECONDARY / FALLBACK: Nodemailer (SMTP / Ethereal)
+  // =========================================================================
   const smtpStatus = checkSmtpConfig();
-  console.log(`[Mailer] Attempting email send to: ${opts.to}`);
-  if (!smtpStatus.configured) {
+  if (!smtpStatus.configured && !resend) {
     console.warn(`[Mailer] ⚠️ Gmail SMTP credentials not configured (SMTP_USER: ${smtpStatus.user || "NOT SET"}, SMTP_PASS: ${smtpStatus.passSet ? "SET" : "NOT SET"}). Falling back to test inbox.`);
   }
 
   const transporter = await getTransporter();
   if (!transporter) {
-    const errorMsg = "SMTP transporter could not be initialized";
+    const errorMsg = "Neither Resend nor SMTP transporter could be initialized";
     console.error(`[Mailer] Email send failure to ${opts.to}. Reason: ${errorMsg}`);
     return { success: false, error: errorMsg };
   }
@@ -199,14 +305,14 @@ export async function sendEmail(opts: {
     if (previewUrl) {
       console.log(`[Mailer] Email send success to ${opts.to} via fallback test inbox (MessageId: ${info.messageId}, Preview: ${previewUrl})`);
     } else {
-      console.log(`[Mailer] Email send success to ${opts.to} (MessageId: ${info.messageId})`);
+      console.log(`[Mailer] Email send success to ${opts.to} via SMTP (MessageId: ${info.messageId})`);
     }
 
     return { success: true, messageId: info.messageId, previewUrl: previewUrl || undefined };
   } catch (err: any) {
-    console.error(`[Mailer] Email send failure to ${opts.to}. Reason: ${err?.message || err}`);
+    console.error(`[Mailer] Email send failure to ${opts.to} via SMTP. Reason: ${err?.message || err}`);
 
-    // If sending via active transporter failed, try fallback so email notification is never lost
+    // If sending via active transporter failed, try ethereal fallback so email notification is never lost
     if (activeTransporter && !etherealTransporter) {
       try {
         console.log(`[Mailer] Attempting fallback delivery for ${opts.to}...`);
@@ -276,21 +382,10 @@ export async function sendOfferLetterEmail(params: OfferEmailParams) {
     const appUrl = (process.env.APP_URL || "https://skillbridge-ai.vercel.app").replace(/\/+$/, "");
     const offerUrl = `${appUrl}/student/offers`;
 
-    // Subject as strictly requested:
-    // Congratulations! Job Offer from [Company Name]
+    // Subject:
     const subject = `Congratulations! Job Offer from ${params.companyName}`;
 
-    // Body as strictly requested:
-    // Dear [Student Name],
-    //
-    // Congratulations!
-    //
-    // We are pleased to inform you that you have received an offer from [Company Name] for the position of [Role].
-    //
-    // Please log in to SkillBridge AI to view and download your offer letter.
-    //
-    // Best Regards,
-    // SkillBridge AI Team
+    // Body:
     const text = `Dear ${params.studentName},
 
 Congratulations!
@@ -433,7 +528,3 @@ SkillBridge AI Team`;
     return { success: false, error: err?.message };
   }
 }
-
-
-
-
