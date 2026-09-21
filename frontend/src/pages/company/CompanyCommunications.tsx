@@ -20,10 +20,12 @@ import {
   X,
   UploadCloud,
   ChevronDown,
+  Mail,
 } from "lucide-react";
 import { api } from "../../lib/api";
 import { Button, Input, Card, Badge, Spinner, Textarea, Select } from "../../components/ui";
 import { useToast } from "../../lib/toast";
+import { openOfferMailClient } from "../../lib/manualEmail";
 import { AISmartAssistant } from "../../components/communication/AISmartAssistant";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -86,7 +88,39 @@ export default function CompanyCommunications() {
   const [offerValidUntil, setOfferValidUntil] = useState("");
   const [selectedOpportunityId, setSelectedOpportunityId] = useState("");
 
+  const [companyName, setCompanyName] = useState<string>("SkillBridge Partner");
   const { push } = useToast();
+
+  const fetchCompanyProfile = async () => {
+    try {
+      const res = await api.get("/companies/me");
+      if (res.data?.data?.name) {
+        setCompanyName(res.data.data.name);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleSendOfferEmail = (studentName: string, studentEmail?: string, jobRole?: string) => {
+    if (!studentEmail) {
+      push("Student email address not found.", "error");
+      return;
+    }
+
+    const res = openOfferMailClient({
+      studentName,
+      studentEmail,
+      companyName,
+      jobRole: jobRole || "Selected Position",
+    });
+
+    if (res.success) {
+      push(`Opening email client for ${studentEmail}...`, "success");
+    } else {
+      push(res.error || "Failed to open email client.", "error");
+    }
+  };
 
   const fetchSentCommunications = async () => {
     try {
@@ -114,6 +148,7 @@ export default function CompanyCommunications() {
   };
 
   useEffect(() => {
+    fetchCompanyProfile();
     fetchSentCommunications();
     fetchApplicants();
   }, []);
@@ -189,7 +224,15 @@ export default function CompanyCommunications() {
         });
 
         if (offerRes.data?.success) {
-          push("Official offer letter issued and emailed to candidate!", "success");
+          push("Official offer letter issued!", "success");
+          const targetApplicant = applicants.find((a) => a.student.user.id === studentId);
+          if (targetApplicant?.student?.user?.email) {
+            handleSendOfferEmail(
+              targetApplicant.student.fullName,
+              targetApplicant.student.user.email,
+              offerJobRole
+            );
+          }
         }
       } else {
         // Standard communication dispatch
@@ -359,6 +402,7 @@ export default function CompanyCommunications() {
                     <th className="p-3.5">Priority</th>
                     <th className="p-3.5">Date Dispatched</th>
                     <th className="p-3.5">Delivery & Read</th>
+                    <th className="p-3.5 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stroke/60">
@@ -410,6 +454,26 @@ export default function CompanyCommunications() {
                             <Check size={14} />
                             Delivered
                           </span>
+                        )}
+                      </td>
+                      <td className="p-3.5 text-right">
+                        {item.category === "OFFER_LETTER" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="inline-flex items-center gap-1.5 text-xs text-emerald-700 border-emerald-200 hover:bg-emerald-50 px-2.5 py-1"
+                            onClick={() =>
+                              handleSendOfferEmail(
+                                item.recipient.student?.fullName || "Candidate",
+                                item.recipient.email,
+                                item.offerLetter?.jobRole || item.subject.replace(/^Congratulations!.*?: /i, "") || "Selected Role"
+                              )
+                            }
+                            title="Open email client with pre-filled offer"
+                          >
+                            <Mail size={12} />
+                            Send Offer Email
+                          </Button>
                         )}
                       </td>
                     </tr>
